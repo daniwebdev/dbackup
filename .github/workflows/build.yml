@@ -1,0 +1,83 @@
+name: Build Rust Project
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build - ${{ matrix.platform.os_name }}
+    runs-on: ${{ matrix.platform.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - os_name: Linux-x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            bin: dbackup
+            name: dbackup-Linux-x86_64.tar.gz
+            
+          - os_name: Windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bin: dbackup.exe
+            name: dbackup-Windows-x86_64.zip
+            
+          - os_name: macOS-x86_64
+            os: macos-latest
+            target: x86_64-apple-darwin
+            bin: dbackup
+            name: dbackup-Darwin-x86_64.tar.gz
+            
+          - os_name: macOS-aarch64
+            os: macos-latest
+            target: aarch64-apple-darwin
+            bin: dbackup
+            name: dbackup-Darwin-aarch64.tar.gz
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform.target }}
+
+      - name: Cache cargo & target directories
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.platform.target }}
+
+      - name: Build binary
+        shell: bash
+        run: |
+          cargo build --release --target ${{ matrix.platform.target }} --verbose
+
+      - name: Package as archive (Linux and macOS)
+        if: matrix.platform.os != 'windows-latest'
+        shell: bash
+        run: |
+          cd target/${{ matrix.platform.target }}/release
+          tar czvf ../../../${{ matrix.platform.name }} ${{ matrix.platform.bin }}
+          cd -
+
+      - name: Package as archive (Windows)
+        if: matrix.platform.os == 'windows-latest'
+        shell: bash
+        run: |
+          cd target/${{ matrix.platform.target }}/release
+          7z a ../../../${{ matrix.platform.name }} ${{ matrix.platform.bin }}
+          cd -
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform.os_name }}
+          path: ${{ matrix.platform.name }}
