@@ -153,11 +153,13 @@ fn validate_config(config_path: PathBuf) -> Result<()> {
 
 fn generate_sample_config(output_path: PathBuf) -> Result<()> {
     let sample_config = r#"# Database Backup Configuration
-drivers:
-  filesystems:
-    - name: "Local"
-      type: "local"
-      base_path: "/var/backups/databases"
+
+settings:
+  binary:
+    # Optional: Specify full paths to backup binaries
+    # If not specified, the tool will use the binary from PATH
+    pg_dump: /usr/bin/pg_dump
+    mysqldump: /usr/bin/mysqldump
 
 backups:
   - name: "Production PostgreSQL Database"
@@ -168,12 +170,16 @@ backups:
       username: postgres
       password: your_password_here
       database: production_db
+    # Backup mode: 'basic' (single-threaded, custom format) or 'parallel' (multi-threaded, directory format)
+    mode: parallel
+    # Number of parallel jobs (only used in parallel mode, default: 2)
+    parallel_jobs: 4
     schedule:
       cron: "0 2 * * *"  # Daily at 2 AM
     storage:
       driver: local
       path: "/var/backups/databases/postgresql"
-      filename_prefix: "prod_db_"
+      filename_prefix: "prod_"
 
   - name: "Development PostgreSQL Database"
     driver: postgresql
@@ -183,10 +189,12 @@ backups:
       username: postgres
       password: your_password_here
       database: dev_db
+    # Using basic mode for smaller databases (mode is optional, defaults to 'basic')
+    mode: basic
     storage:
       driver: local
       path: "/var/backups/databases/postgresql"
-      filename_prefix: "dev_db_"
+      filename_prefix: "dev_"
 "#;
 
     std::fs::write(&output_path, sample_config)

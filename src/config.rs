@@ -3,21 +3,36 @@ use std::path::PathBuf;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Config {
-    pub drivers: Drivers,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub settings: Option<Settings>,
     pub backups: Vec<BackupConfig>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct Drivers {
-    pub filesystems: Vec<FilesystemDriver>,
+pub struct Settings {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binary: Option<BinarySettings>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct FilesystemDriver {
-    pub name: String,
-    #[serde(rename = "type")]
-    pub driver_type: String,
-    pub base_path: PathBuf,
+pub struct BinarySettings {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pg_dump: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mysqldump: Option<PathBuf>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(rename_all = "lowercase")]
+pub enum BackupMode {
+    Basic,
+    Parallel,
+}
+
+impl Default for BackupMode {
+    fn default() -> Self {
+        BackupMode::Basic
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -28,6 +43,16 @@ pub struct BackupConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub schedule: Option<ScheduleConfig>,
     pub storage: StorageConfig,
+    #[serde(default)]
+    pub mode: BackupMode,
+    #[serde(default = "default_parallel_jobs")]
+    pub parallel_jobs: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binary_path: Option<PathBuf>,
+}
+
+fn default_parallel_jobs() -> u8 {
+    2
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
