@@ -1,0 +1,35 @@
+# Database Backup Configuration
+drivers:
+  filesystems:
+    - name: "Local"
+      type: "local"
+      base_path: "/var/backups/databases"
+
+backups:
+  - name: "Production PostgreSQL Database"
+    driver: postgresql
+    connection:
+      host: localhost
+      port: 5432
+      username: postgres
+      password: your_password_here
+      database: production_db
+    schedule:
+      cron: "0 2 * * *"  # Daily at 2 AM
+    storage:
+      driver: local
+      path: "/var/backups/databases/postgresql"
+      filename_prefix: "prod_db_"
+
+  - name: "Development PostgreSQL Database"
+    driver: postgresql
+    connection:
+      host: localhost
+      port: 5432
+      username: postgres
+      password: your_password_here
+      database: dev_db
+    storage:
+      driver: local
+      path: "/var/backups/databases/postgresql"
+      filename_prefix: "dev_db_"
