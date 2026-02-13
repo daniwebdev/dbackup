@@ -1,4 +1,4 @@
-# Rust Database Backup Tool
+# DBackup Tool
 
 A robust, high-performance PostgreSQL database backup utility written in **Rust**, designed for reliability and ease of use through YAML-based configuration.
 
