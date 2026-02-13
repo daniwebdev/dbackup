@@ -28,13 +28,13 @@ jobs:
             name: dbackup-Windows-x86_64.zip
             
           - os_name: macOS-x86_64
-            os: macOS-latest
+            os: macos-latest
             target: x86_64-apple-darwin
             bin: dbackup
             name: dbackup-Darwin-x86_64.tar.gz
             
           - os_name: macOS-aarch64
-            os: macOS-latest
+            os: macos-latest
             target: aarch64-apple-darwin
             bin: dbackup
             name: dbackup-Darwin-aarch64.tar.gz
