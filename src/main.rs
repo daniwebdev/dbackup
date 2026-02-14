@@ -10,7 +10,7 @@ use tracing::{error, info};
 use tracing_subscriber;
 
 #[derive(Parser)]
-#[command(name = "db-backup-tools")]
+#[command(name = "dbackup")]
 #[command(about = "A robust database backup utility", long_about = None)]
 struct Cli {
     #[command(subcommand)]

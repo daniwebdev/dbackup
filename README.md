@@ -47,7 +47,7 @@ cd db-backup-tools
 cargo build --release
 ```
 
-The compiled binary will be available at `target/release/db-backup-tools`.
+The compiled binary will be available at `target/release/dbackup`.
 
 ### Install Globally
 
@@ -60,7 +60,7 @@ cargo install --path .
 ### Generate Sample Configuration
 
 ```bash
-db-backup-tools generate -o backup.yml
+dbackup generate -o backup.yml
 ```
 
 This creates a sample configuration file that you can customize.
@@ -68,7 +68,7 @@ This creates a sample configuration file that you can customize.
 ### Validate Configuration
 
 ```bash
-db-backup-tools validate -c backup.yml
+dbackup validate -c backup.yml
 ```
 
 Validates your configuration file without running backups.
@@ -77,19 +77,19 @@ Validates your configuration file without running backups.
 
 Run all configured backups:
 ```bash
-db-backup-tools backup -c backup.yml
+dbackup backup -c backup.yml
 ```
 
 Run a specific backup by name:
 ```bash
-db-backup-tools backup -c backup.yml -n "Production PostgreSQL Database"
+dbackup backup -c backup.yml -n "Production PostgreSQL Database"
 ```
 
 ### Enable Verbose Logging
 
 Set the `RUST_LOG` environment variable:
 ```bash
-RUST_LOG=debug db-backup-tools backup -c backup.yml
+RUST_LOG=debug dbackup backup -c backup.yml
 ```
 
 ## ⚙️ Configuration Format
@@ -307,7 +307,7 @@ cargo test -- --nocapture
 
 1. **Generate configuration:**
    ```bash
-   db-backup-tools generate -o my-backup.yml
+   dbackup generate -o my-backup.yml
    ```
 
 2. **Edit configuration with your database details:**
@@ -317,12 +317,12 @@ cargo test -- --nocapture
 
 3. **Validate configuration:**
    ```bash
-   db-backup-tools validate -c my-backup.yml
+   dbackup validate -c my-backup.yml
    ```
 
 4. **Run backup:**
    ```bash
-   db-backup-tools backup -c my-backup.yml
+   dbackup backup -c my-backup.yml
    ```
 
 5. **Verify backup file:**

@@ -264,7 +264,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "db-backup-tools"
+name = "dbackup"
 version = "0.1.0"
 dependencies = [
  "anyhow",

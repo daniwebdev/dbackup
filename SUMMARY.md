@@ -43,7 +43,7 @@ cargo build --release
 
 ### 2. Generate Configuration
 ```bash
-./target/release/db-backup-tools generate -o backup.yml
+./target/release/dbackup generate -o backup.yml
 ```
 
 ### 3. Edit Configuration
@@ -66,7 +66,7 @@ backups:
 
 ### 4. Run Backup
 ```bash
-./target/release/db-backup-tools backup -c backup.yml
+./target/release/dbackup backup -c backup.yml
 ```
 
 ## ✨ Key Features
@@ -134,19 +134,19 @@ The application has been tested and verified:
 cargo build --release
 
 # Generate config
-./target/release/db-backup-tools generate -o backup.yml
+./target/release/dbackup generate -o backup.yml
 
 # Validate config
-./target/release/db-backup-tools validate -c backup.yml
+./target/release/dbackup validate -c backup.yml
 
 # Run backup (all)
-./target/release/db-backup-tools backup -c backup.yml
+./target/release/dbackup backup -c backup.yml
 
 # Run backup (specific)
-./target/release/db-backup-tools backup -c backup.yml -n "Database Name"
+./target/release/dbackup backup -c backup.yml -n "Database Name"
 
 # With debug logging
-RUST_LOG=debug ./target/release/db-backup-tools backup -c backup.yml
+RUST_LOG=debug ./target/release/dbackup backup -c backup.yml
 
 # Run tests
 cargo test

@@ -27,11 +27,11 @@ cd /path/to/db-backup-tools
 cargo build --release
 
 # Install globally
-sudo cp target/release/db-backup-tools /usr/local/bin/
-sudo chmod +x /usr/local/bin/db-backup-tools
+sudo cp target/release/dbackup /usr/local/bin/
+sudo chmod +x /usr/local/bin/dbackup
 
 # Verify installation
-db-backup-tools --help
+dbackup --help
 ```
 
 ### 2. Create Configuration Directory
@@ -52,7 +52,7 @@ sudo chown $USER:$USER /var/backups/postgresql
 
 ```bash
 # Generate configuration
-db-backup-tools generate -o /etc/db-backup/backup.yml
+dbackup generate -o /etc/db-backup/backup.yml
 
 # Edit configuration
 nano /etc/db-backup/backup.yml
@@ -110,10 +110,10 @@ ls -la /etc/db-backup/backup.yml
 
 ```bash
 # Validate configuration
-db-backup-tools validate -c /etc/db-backup/backup.yml
+dbackup validate -c /etc/db-backup/backup.yml
 
 # Run a test backup
-db-backup-tools backup -c /etc/db-backup/backup.yml
+dbackup backup -c /etc/db-backup/backup.yml
 
 # Verify backup files
 ls -lh /var/backups/postgresql/
@@ -133,7 +133,7 @@ Create `/usr/local/bin/run-db-backup.sh`:
 CONFIG_FILE="/etc/db-backup/backup.yml"
 LOG_DIR="/var/log/db-backup"
 LOG_FILE="$LOG_DIR/backup-$(date +%Y%m%d).log"
-BACKUP_TOOL="/usr/local/bin/db-backup-tools"
+BACKUP_TOOL="/usr/local/bin/dbackup"
 NOTIFICATION_EMAIL="admin@example.com"
 
 # Create log directory if it doesn't exist
