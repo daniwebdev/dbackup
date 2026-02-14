@@ -21,14 +21,14 @@ jobs:
           - os_name: Linux-x86_64
             os: ubuntu-latest
             target: x86_64-unknown-linux-musl
-            bin: db-backup-tools
-            name: db-backup-tools-Linux-x86_64.tar.gz
+            bin: dbackup
+            name: dbackup-Linux-x86_64.tar.gz
             
           - os_name: macOS-aarch64
             os: macos-latest
             target: aarch64-apple-darwin
-            bin: db-backup-tools
-            name: db-backup-tools-Darwin-aarch64.tar.gz
+            bin: dbackup
+            name: dbackup-Darwin-aarch64.tar.gz
 
     steps:
       - name: Checkout code
@@ -89,6 +89,6 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            Linux-x86_64/db-backup-tools-Linux-x86_64.tar.gz
-            macOS-aarch64/db-backup-tools-Darwin-aarch64.tar.gz
+            Linux-x86_64/dbackup-Linux-x86_64.tar.gz
+            macOS-aarch64/dbackup-Darwin-aarch64.tar.gz
           generate_release_notes: true
