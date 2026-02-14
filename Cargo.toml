@@ -16,6 +16,9 @@ tokio = { version = "1.35", features = ["full"] }
 # Date and time
 chrono = "0.4"
 
+# Cron scheduling
+cron = "0.12"
+
 # Command execution
 tokio-process = "0.2"
 

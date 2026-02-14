@@ -9,9 +9,12 @@ A robust, high-performance PostgreSQL database backup utility written in **Rust*
 - **Dual Backup Modes**: 
   - **Basic Mode**: Single-threaded with maximum compression for smaller databases
   - **Parallel Mode**: Multi-threaded backups for faster processing of large databases
+- **Scheduled Backups**: Cron-based scheduling with concurrent execution
+- **Systemd Integration**: Run as a service with automatic restart and resource limits
 - **Flexible Storage**: Backup to local filesystems with automatic compression
 - **High-Efficiency Compression**: Automatically applies optimal compression to minimize storage usage
 - **Robust Error Handling**: Comprehensive error reporting and validation
+- **Memory Efficient**: Streaming I/O, concurrent jobs with semaphore-based limits
 - **CLI Interface**: Easy-to-use command-line interface for backup operations
 - **Multi-Database Management**: Handle multiple database instances within a single config
 
@@ -73,7 +76,7 @@ dbackup validate -c backup.yml
 
 Validates your configuration file without running backups.
 
-### Run Backup
+### Run Backup (One-Time)
 
 Run all configured backups:
 ```bash
@@ -85,11 +88,35 @@ Run a specific backup by name:
 dbackup backup -c backup.yml -n "Production PostgreSQL Database"
 ```
 
+### Run Scheduled Backups (Daemon Mode)
+
+Listen for scheduled backups with up to 4 concurrent jobs:
+```bash
+dbackup run -c backup.yml --concurrency 4
+```
+
+Or use the default concurrency of 2:
+```bash
+dbackup run -c backup.yml
+```
+
+This command will:
+- Parse all backups with `schedule` defined
+- Listen for scheduled times based on cron expressions
+- Execute backups automatically at scheduled times
+- Run up to N backups concurrently
+- Continue listening until stopped (Ctrl+C)
+
 ### Enable Verbose Logging
 
 Set the `RUST_LOG` environment variable:
 ```bash
 RUST_LOG=debug dbackup backup -c backup.yml
+```
+
+For scheduled backups:
+```bash
+RUST_LOG=info dbackup run -c backup.yml
 ```
 
 ## ⚙️ Configuration Format
@@ -279,16 +306,121 @@ rm -rf /tmp/restore_dir
 
 3. **Network Security**: When backing up remote databases, ensure secure network connections.
 
+## � Running with Systemd
+
+To run dbackup as a systemd service for automatic scheduled backups:
+
+### 1. Install the Binary
+
+```bash
+sudo cp target/release/dbackup /usr/local/bin/
+sudo chmod +x /usr/local/bin/dbackup
+```
+
+### 2. Create Configuration Directory
+
+```bash
+sudo mkdir -p /etc/dbackup /var/lib/dbackup /var/backups/postgresql
+sudo chown postgres:postgres /etc/dbackup /var/lib/dbackup /var/backups/postgresql
+sudo chmod 700 /etc/dbackup
+```
+
+### 3. Setup Configuration
+
+```bash
+sudo cp backup.yml /etc/dbackup/backup.yml
+sudo chown postgres:postgres /etc/dbackup/backup.yml
+sudo chmod 600 /etc/dbackup/backup.yml
+```
+
+### 4. Install Systemd Service
+
+```bash
+sudo cp dbackup.service /etc/systemd/system/
+sudo systemctl daemon-reload
+```
+
+### 5. Enable and Start the Service
+
+```bash
+# Enable on boot
+sudo systemctl enable dbackup.service
+
+# Start the service
+sudo systemctl start dbackup.service
+
+# Check status
+sudo systemctl status dbackup.service
+
+# View logs
+sudo journalctl -u dbackup.service -f
+```
+
+### Configuration Example with Schedules
+
+Edit `/etc/dbackup/backup.yml`:
+
+```yaml
+settings:
+  binary:
+    pg_dump: /usr/bin/pg_dump
+
+backups:
+  - name: "Daily Production Backup"
+    driver: postgresql
+    connection:
+      host: localhost
+      port: 5432
+      username: postgres
+      password: your_password
+      database: production_db
+    mode: parallel
+    parallel_jobs: 4
+    schedule:
+      cron: "0 2 * * *"  # Daily at 2 AM
+    storage:
+      driver: local
+      path: "/var/backups/postgresql"
+      filename_prefix: "prod_"
+
+  - name: "Hourly Analytics Backup"
+    driver: postgresql
+    connection:
+      host: analytics.example.com
+      port: 5432
+      username: postgres
+      password: your_password
+      database: analytics_db
+    mode: basic
+    schedule:
+      cron: "0 * * * *"  # Every hour
+    storage:
+      driver: local
+      path: "/var/backups/postgresql"
+      filename_prefix: "analytics_"
+```
+
+### Cron Expression Format
+
+Format: `minute hour day month weekday`
+
+Common examples:
+- `0 2 * * *` - Daily at 2:00 AM
+- `0 * * * *` - Every hour
+- `0 0 * * 0` - Weekly (every Sunday at midnight)
+- `0 0 1 * *` - Monthly (1st day at midnight)
+- `*/30 * * * *` - Every 30 minutes
+- `0 2,14 * * *` - At 2 AM and 2 PM daily
+
 ## 🗺️ Roadmap
 
-- [ ] **Scheduled Backups**: Implement cron-based scheduling
+- [x] **Scheduled Backups**: Implement cron-based scheduling ✅ DONE
 - [ ] **S3 Storage**: Add support for S3-compatible cloud storage
 - [ ] **MySQL Support**: Add MySQL/MariaDB backup support
 - [ ] **Retention Policies**: Automatic cleanup of old backups
 - [ ] **Encryption**: Add encryption for backup files
 - [ ] **Notifications**: Email/Slack notifications for backup status
 - [ ] **Incremental Backups**: Support for incremental backup strategies
-- [ ] **Parallel Backups**: Run multiple backups concurrently
 - [ ] **Environment Variables**: Support for credentials via environment variables
 
 ## 🧪 Testing

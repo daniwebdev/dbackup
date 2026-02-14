@@ -1,0 +1,37 @@
+[Unit]
+Description=Database Backup Tool - Scheduled Backups
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=postgres
+Group=postgres
+WorkingDirectory=/var/lib/dbackup
+ExecStart=/usr/local/bin/dbackup run -c /etc/dbackup/backup.yml --concurrency 2
+
+# Restart policy
+Restart=on-failure
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=dbackup
+
+# Resource limits
+MemoryLimit=512M
+MemoryMax=1G
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/backups /var/lib/dbackup
+
+# Timeout for graceful shutdown
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

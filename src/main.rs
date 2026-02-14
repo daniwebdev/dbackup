@@ -1,10 +1,12 @@
 mod config;
 mod postgres;
+mod scheduler;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use config::Config;
 use postgres::PostgresBackup;
+use scheduler::BackupScheduler;
 use std::path::PathBuf;
 use tracing::{error, info};
 use tracing_subscriber;
@@ -41,6 +43,16 @@ enum Commands {
         #[arg(short, long, default_value = "backup.yml")]
         output: PathBuf,
     },
+    /// Run scheduled backups (listens for cron schedules)
+    Run {
+        /// Path to the configuration file
+        #[arg(short, long, default_value = "backup.yml")]
+        config: PathBuf,
+
+        /// Maximum number of concurrent backup jobs (default: 2)
+        #[arg(short, long, default_value = "2")]
+        concurrency: usize,
+    },
 }
 
 #[tokio::main]
@@ -64,6 +76,9 @@ async fn main() -> Result<()> {
         }
         Commands::Generate { output } => {
             generate_sample_config(output)?;
+        }
+        Commands::Run { config, concurrency } => {
+            run_scheduled_backups(config, concurrency).await?;
         }
     }
 
@@ -149,6 +164,23 @@ fn validate_config(config_path: PathBuf) -> Result<()> {
 
     info!("✓ Configuration is valid");
     Ok(())
+}
+
+async fn run_scheduled_backups(config_path: PathBuf, concurrency: usize) -> Result<()> {
+    info!("Loading configuration from: {}", config_path.display());
+    let config = Config::from_file(&config_path)
+        .context("Failed to load configuration file")?;
+
+    // Validate concurrency setting
+    if concurrency == 0 {
+        anyhow::bail!("Concurrency must be greater than 0");
+    }
+
+    // Create scheduler
+    let scheduler = BackupScheduler::new(config, concurrency);
+
+    // Run the scheduler (infinite loop until Ctrl+C)
+    scheduler.run().await
 }
 
 fn generate_sample_config(output_path: PathBuf) -> Result<()> {
