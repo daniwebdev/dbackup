@@ -44,8 +44,34 @@ jobs:
         with:
           key: ${{ matrix.platform.target }}
 
+      - name: Extract version and build date
+        id: version_info
+        shell: bash
+        run: |
+          # Extract version from git tag or use 'develop'
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            GIT_VERSION="${{ github.ref }}"
+            GIT_VERSION="${GIT_VERSION#refs/tags/}"
+          else
+            GIT_VERSION="develop"
+          fi
+          
+          # Get current build date
+          BUILD_DATE=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          
+          echo "GIT_VERSION=${GIT_VERSION}" >> "$GITHUB_ENV"
+          echo "BUILD_DATE=${BUILD_DATE}" >> "$GITHUB_ENV"
+          echo "git_version=${GIT_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "build_date=${BUILD_DATE}" >> "$GITHUB_OUTPUT"
+          
+          echo "Version: ${GIT_VERSION}"
+          echo "Build Date: ${BUILD_DATE}"
+
       - name: Build binary
         shell: bash
+        env:
+          GIT_VERSION: ${{ env.GIT_VERSION }}
+          BUILD_DATE: ${{ env.BUILD_DATE }}
         run: |
           cargo build --release --target ${{ matrix.platform.target }} --verbose
 
