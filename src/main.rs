@@ -11,6 +11,11 @@ use std::path::PathBuf;
 use tracing::{error, info};
 use tracing_subscriber;
 
+// Version information from build environment
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+const BUILD_DATE_ENV: Option<&str> = option_env!("BUILD_DATE");
+const GIT_VERSION_ENV: Option<&str> = option_env!("GIT_VERSION");
+
 #[derive(Parser)]
 #[command(name = "dbackup")]
 #[command(about = "A robust database backup utility", long_about = None)]
@@ -53,6 +58,8 @@ enum Commands {
         #[arg(short, long, default_value = "2")]
         concurrency: usize,
     },
+    /// Show version and build information
+    Version,
 }
 
 #[tokio::main]
@@ -79,6 +86,9 @@ async fn main() -> Result<()> {
         }
         Commands::Run { config, concurrency } => {
             run_scheduled_backups(config, concurrency).await?;
+        }
+        Commands::Version => {
+            show_version();
         }
     }
 
@@ -236,4 +246,19 @@ backups:
     info!("  Edit this file with your database credentials and paths");
     
     Ok(())
+}
+
+fn show_version() {
+    let git_version = GIT_VERSION_ENV.unwrap_or("develop");
+    let build_date = BUILD_DATE_ENV.unwrap_or("unknown");
+    
+    if git_version == "develop" {
+        println!("dbackup (develop)");
+    } else {
+        if build_date == "unknown" {
+            println!("dbackup ({})", git_version);
+        } else {
+            println!("dbackup ({}) built on {}", git_version, build_date);
+        }
+    }
 }
