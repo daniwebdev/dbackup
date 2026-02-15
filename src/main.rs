@@ -16,7 +16,7 @@ use tracing::{error, info};
 use tracing_subscriber;
 
 // Version information from build environment
-// const VERSION: &str = env!("CARGO_PKG_VERSION");
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 const BUILD_DATE_ENV: Option<&str> = option_env!("BUILD_DATE");
 const GIT_VERSION_ENV: Option<&str> = option_env!("GIT_VERSION");
 const DEFAULT_CONFIG_PATH: &str = "/etc/dbackup/backup.yml";
@@ -24,10 +24,20 @@ const FALLBACK_CONFIG_PATH: &str = "backup.yml";
 
 #[derive(Parser)]
 #[command(name = "dbackup")]
-#[command(about = "A robust database backup utility", long_about = None)]
+#[command(version = VERSION)]
+#[command(about = "A robust database backup utility")]
+#[command(long_about = "A robust database backup utility with multi-engine support, cloud storage integration, and automated scheduling.\n\nExamples:\n  dbackup backup -c /path/to/config.yml          # Run all backups\n  dbackup backup -c /path/to/config.yml -n pg1  # Run specific backup\n  dbackup validate -c /path/to/config.yml       # Validate configuration\n  dbackup run -c /path/to/config.yml            # Start scheduled backups\n  dbackup update                                 # Check and install updates\n  dbackup version                                # Show version and build info")]
 struct Cli {
+    /// Show version information
+    #[arg(long, global = true)]
+    version: bool,
+
+    /// Show help information
+    #[arg(long, global = true)]
+    help: bool,
+
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
@@ -81,9 +91,71 @@ async fn main() -> Result<()> {
         .init();
 
     let cli = Cli::parse();
-    let git_version = GIT_VERSION_ENV.unwrap_or("develop");
+    let git_version = GIT_VERSION_ENV.unwrap_or(VERSION);
 
-    match cli.command {
+    // Handle version flag first (has priority)
+    if cli.version {
+        show_version(git_version).await;
+        return Ok(());
+    }
+
+    // Handle help flag
+    if cli.help {
+        println!("A robust database backup utility with multi-engine support, cloud storage integration, and automated scheduling.\n");
+        println!("Usage: dbackup [COMMAND]\n");
+        println!("Commands:");
+        println!("  backup    Run a backup based on configuration file");
+        println!("  validate  Validate the configuration file");
+        println!("  generate  Generate a sample configuration file");
+        println!("  run       Run scheduled backups (listens for cron schedules)");
+        println!("  version   Show version and build information");
+        println!("  update    Check for and install the latest version");
+        println!("  help      Print this message or the help of the given subcommand(s)\n");
+        println!("Options:");
+        println!("  --version  Show version information");
+        println!("  --help     Show help information");
+        println!("  -h, --help Print help\n");
+        println!("Examples:");
+        println!("  dbackup backup -c /path/to/config.yml          # Run all backups");
+        println!("  dbackup backup -c /path/to/config.yml -n pg1  # Run specific backup");
+        println!("  dbackup validate -c /path/to/config.yml       # Validate configuration");
+        println!("  dbackup run -c /path/to/config.yml            # Start scheduled backups");
+        println!("  dbackup update                                 # Check and install updates");
+        println!("  dbackup version                                # Show version and build info\n");
+        return Ok(());
+    }
+
+    // If no subcommand provided, show help
+    let command = match cli.command {
+        Some(cmd) => cmd,
+        None => {
+            // Print help information
+            println!("A robust database backup utility with multi-engine support, cloud storage integration, and automated scheduling.\n");
+            println!("Usage: dbackup [COMMAND]\n");
+            println!("Commands:");
+            println!("  backup    Run a backup based on configuration file");
+            println!("  validate  Validate the configuration file");
+            println!("  generate  Generate a sample configuration file");
+            println!("  run       Run scheduled backups (listens for cron schedules)");
+            println!("  version   Show version and build information");
+            println!("  update    Check for and install the latest version");
+            println!("  help      Print this message or the help of the given subcommand(s)\n");
+            println!("Options:");
+            println!("  --version  Show version information");
+            println!("  --help     Show help information");
+            println!("  -h, --help Print help\n");
+            println!("Examples:");
+            println!("  dbackup backup -c /path/to/config.yml          # Run all backups");
+            println!("  dbackup backup -c /path/to/config.yml -n pg1  # Run specific backup");
+            println!("  dbackup validate -c /path/to/config.yml       # Validate configuration");
+            println!("  dbackup run -c /path/to/config.yml            # Start scheduled backups");
+            println!("  dbackup update                                 # Check and install updates");
+            println!("  dbackup version                                # Show version and build info\n");
+            return Ok(());
+        }
+    };
+
+    match command {
         Commands::Backup { config, name } => {
             let config_path = resolve_config_path(config)?;
             run_backup(config_path, name).await?;
@@ -366,16 +438,21 @@ backups:
 
 async fn show_version(git_version: &str) {
     let build_date = BUILD_DATE_ENV.unwrap_or("unknown");
+    let pkg_version = VERSION;
     
-    if git_version == "develop" {
-        println!("dbackup (develop)");
-    } else {
-        if build_date == "unknown" {
-            println!("dbackup ({})", git_version);
-        } else {
-            println!("dbackup ({}) built on {}", git_version, build_date);
-        }
+    println!("dbackup {}", pkg_version);
+    
+    if git_version != "develop" && git_version != pkg_version {
+        println!("Release: {}", git_version);
     }
+    
+    if build_date != "unknown" {
+        println!("Built: {}", build_date);
+    }
+    
+    // Print system info
+    println!("Platform: {}", std::env::consts::OS);
+    println!("Architecture: {}", std::env::consts::ARCH);
     
     // Check for updates asynchronously
     if let Err(e) = check_and_show_update(git_version).await {
