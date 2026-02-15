@@ -89,7 +89,7 @@ async fn main() -> Result<()> {
         }
         Commands::Validate { config } => {
             let config_path = resolve_config_path(config)?;
-            validate_config(config_path)?;
+            validate_config(config_path).await?;
         }
         Commands::Generate { output } => {
             generate_sample_config(output)?;
@@ -195,7 +195,7 @@ async fn run_backup(config_path: PathBuf, backup_name: Option<String>) -> Result
     Ok(())
 }
 
-fn validate_config(config_path: PathBuf) -> Result<()> {
+async fn validate_config(config_path: PathBuf) -> Result<()> {
     info!("Validating configuration: {}", config_path.display());
     
     let config = Config::from_file(&config_path)
@@ -211,9 +211,31 @@ fn validate_config(config_path: PathBuf) -> Result<()> {
                 let storage_config = config.get_storage_for_backup(backup_config)
                     .context(format!("Failed to resolve storage for backup '{}'", backup_config.name))?;
 
+                // Validate storage connection
+                info!("  Testing {} storage connection...", storage_config.driver);
+                match storage_config.driver.to_lowercase().as_str() {
+                    "s3" => {
+                        storage::S3Storage::new(&storage_config)
+                            .await
+                            .context(format!("S3 storage validation failed for backup '{}'", backup_config.name))?;
+                        info!("  ✓ S3 storage connection validated");
+                    }
+                    "local" => {
+                        storage::LocalStorage::new(&storage_config)
+                            .context(format!("Local storage validation failed for backup '{}'", backup_config.name))?;
+                        info!("  ✓ Local storage validated");
+                    }
+                    driver => {
+                        error!("Unsupported storage driver: {}", driver);
+                        anyhow::bail!("Unsupported storage driver: {}", driver);
+                    }
+                }
+
+                // Validate database connection
                 let backup = PostgresBackup::new(backup_config.clone(), storage_config);
                 backup.validate_connection()
-                    .context(format!("Validation failed for backup '{}'", backup_config.name))?;
+                    .context(format!("Database validation failed for backup '{}'", backup_config.name))?;
+                info!("  ✓ PostgreSQL connection validated");
             }
             driver => {
                 error!("Unsupported database driver: {}", driver);
