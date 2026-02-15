@@ -12,7 +12,7 @@ use tracing::{error, info};
 use tracing_subscriber;
 
 // Version information from build environment
-const VERSION: &str = env!("CARGO_PKG_VERSION");
+// const VERSION: &str = env!("CARGO_PKG_VERSION");
 const BUILD_DATE_ENV: Option<&str> = option_env!("BUILD_DATE");
 const GIT_VERSION_ENV: Option<&str> = option_env!("GIT_VERSION");
 
