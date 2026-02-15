@@ -83,6 +83,9 @@ jobs:
           BUILD_DATE: ${{ env.BUILD_DATE }}
           CC_x86_64_unknown_linux_musl: x86_64-linux-musl-gcc
           CC_aarch64_unknown_linux_musl: aarch64-linux-gnu-gcc
+          AR_aarch64_unknown_linux_musl: aarch64-linux-gnu-ar
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_AR: aarch64-linux-gnu-ar
           CARGO_CFG_TARGET_FEATURE: crt-static
         run: |
           cargo build --release --target ${{ matrix.platform.target }} --verbose
