@@ -1,12 +1,14 @@
 mod config;
 mod postgres;
 mod scheduler;
+mod updater;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use config::Config;
 use postgres::PostgresBackup;
 use scheduler::BackupScheduler;
+use updater::check_and_show_update;
 use std::path::PathBuf;
 use tracing::{error, info};
 use tracing_subscriber;
@@ -62,6 +64,8 @@ enum Commands {
     },
     /// Show version and build information
     Version,
+    /// Check for and install the latest version
+    Update,
 }
 
 #[tokio::main]
@@ -93,7 +97,10 @@ async fn main() -> Result<()> {
             run_scheduled_backups(config_path, concurrency).await?;
         }
         Commands::Version => {
-            show_version();
+            show_version().await;
+        }
+        Commands::Update => {
+            updater::update_binary().await?;
         }
     }
 
@@ -283,7 +290,7 @@ backups:
     Ok(())
 }
 
-fn show_version() {
+async fn show_version() {
     let git_version = GIT_VERSION_ENV.unwrap_or("develop");
     let build_date = BUILD_DATE_ENV.unwrap_or("unknown");
     
@@ -295,5 +302,11 @@ fn show_version() {
         } else {
             println!("dbackup ({}) built on {}", git_version, build_date);
         }
+    }
+    
+    // Check for updates asynchronously
+    if let Err(e) = check_and_show_update(git_version).await {
+        // Silently ignore update check errors
+        tracing::debug!("Update check failed: {}", e);
     }
 }
