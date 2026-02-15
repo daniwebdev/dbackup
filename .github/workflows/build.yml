@@ -44,6 +44,12 @@ jobs:
         with:
           key: ${{ matrix.platform.target }}
 
+      - name: Install musl tools (Linux only)
+        if: matrix.platform.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
       - name: Extract version and build date
         id: version_info
         shell: bash
@@ -72,6 +78,8 @@ jobs:
         env:
           GIT_VERSION: ${{ env.GIT_VERSION }}
           BUILD_DATE: ${{ env.BUILD_DATE }}
+          CC_x86_64_unknown_linux_musl: x86_64-linux-musl-gcc
+          CARGO_CFG_TARGET_FEATURE: crt-static
         run: |
           cargo build --release --target ${{ matrix.platform.target }} --verbose
 
