@@ -1,7 +1,8 @@
 use anyhow::{Context, Result, anyhow};
 use serde_json::Value;
 use std::fs;
-use tracing::info;
+use std::process::Command;
+use tracing::{info, warn};
 
 const GITHUB_API_URL: &str = "https://api.github.com/repos/daniwebdev/dbackup/releases/latest";
 
@@ -16,6 +17,10 @@ fn get_target_triple() -> Result<&'static str> {
     #[cfg(target_arch = "x86_64")]
     return Ok("Linux-x86_64");
 
+    #[cfg(target_os = "linux")]
+    #[cfg(target_arch = "aarch64")]
+    return Ok("Linux-arm64");
+
     #[cfg(target_os = "macos")]
     #[cfg(target_arch = "aarch64")]
     return Ok("Darwin-aarch64");
@@ -26,6 +31,7 @@ fn get_target_triple() -> Result<&'static str> {
 
     #[cfg(not(any(
         all(target_os = "linux", target_arch = "x86_64"),
+        all(target_os = "linux", target_arch = "aarch64"),
         all(target_os = "macos", target_arch = "aarch64"),
         all(target_os = "macos", target_arch = "x86_64")
     )))]
@@ -204,25 +210,105 @@ pub async fn update_binary(current_version: &str) -> Result<()> {
         .context("Failed to create backup of current binary")?;
     info!("Backed up current binary to: {}", backup_path.display());
 
-    // Replace the binary
-    fs::copy(&extracted_binary, &current_binary)
-        .context("Failed to replace binary")?;
-
-    // Make it executable on Unix systems
+    // Make extracted binary executable
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let perms = fs::Permissions::from_mode(0o755);
-        fs::set_permissions(&current_binary, perms)
-            .context("Failed to set executable permissions")?;
+        fs::set_permissions(&extracted_binary, perms)
+            .context("Failed to set executable permissions on extracted binary")?
     }
 
-    // Cleanup
-    fs::remove_file(&archive_path).ok();
-    fs::remove_dir_all(&extract_dir).ok();
+    // Create update script that will run after this process exits
+    let script_path = std::env::temp_dir().join("dbackup-update.sh");
+    let script_content = format!(
+        r#"#!/bin/bash
+set -e
 
-    info!("✓ Binary updated successfully to {}", release.tag_name);
-    println!("✓ dbackup updated to {} successfully!", release.tag_name);
+CURRENT_BINARY="{}"
+NEW_BINARY="{}"
+BACKUP_PATH="{}"
+TEMP_ARCHIVE="{}"
+TEMP_EXTRACT="{}"
+
+# Wait a moment for the process to fully exit
+sleep 1
+
+# Log what we're doing
+echo "[dbackup-update] Attempting binary replacement..."
+
+# First, try to use move (atomic operation)
+if /bin/mv "$NEW_BINARY" "$CURRENT_BINARY" 2>/dev/null; then
+    echo "[dbackup-update] Binary replaced successfully"
+else
+    # If move fails due to lock, try copy + replace approach
+    echo "[dbackup-update] Move failed, trying copy approach..."
+    /bin/cp "$NEW_BINARY" "$CURRENT_BINARY" || {{
+        echo "[dbackup-update] ERROR: Failed to replace binary"
+        exit 1
+    }}
+    /bin/rm -f "$NEW_BINARY" 2>/dev/null || true
+    echo "[dbackup-update] Binary replaced via copy"
+fi
+
+# Ensure executable permission
+/bin/chmod +x "$CURRENT_BINARY"
+
+echo "[dbackup-update] Update completed successfully!"
+echo "[dbackup-update] Current binary: $(file $CURRENT_BINARY)"
+
+# Try to restart systemd service if it exists
+if command -v systemctl &>/dev/null; then
+    if systemctl list-unit-files 2>/dev/null | grep -q dbackup.service; then
+        echo "[dbackup-update] Attempting to restart dbackup.service..."
+        if systemctl restart dbackup.service 2>/dev/null; then
+            echo "[dbackup-update] Service restarted successfully"
+        else
+            echo "[dbackup-update] Note: Could not restart service (may require sudo or service not running)"
+        fi
+    fi
+fi
+
+# Cleanup temporary files
+/bin/rm -f "$TEMP_ARCHIVE" 2>/dev/null || true
+/bin/rm -rf "$TEMP_EXTRACT" 2>/dev/null || true
+/bin/rm -f "$0" 2>/dev/null || true
+"#,
+        current_binary.display(),
+        extracted_binary.display(),
+        backup_path.display(),
+        archive_path.display(),
+        extract_dir.display()
+    );
+
+    fs::write(&script_path, &script_content)
+        .context("Failed to write update script")?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = fs::Permissions::from_mode(0o755);
+        fs::set_permissions(&script_path, perms)
+            .context("Failed to set executable permissions on script")?
+    }
+
+    info!("✓ Downloaded and prepared binary for {}", release.tag_name);
+    info!("Launching update script to replace binary...");
+
+    // Spawn the update script in background
+    let _child = Command::new("bash")
+        .arg(&script_path)
+        .spawn()
+        .context("Failed to spawn update script")?;
+
+    warn!("Update in progress. This process will exit and the binary will be replaced.");
+    warn!("The update script is running in the background.");
+    if cfg!(unix) {
+        warn!("If 'dbackup' is running as a systemd service, it will be automatically restarted.");
+    }
+
+    println!("\n✓ Update initiated for version {}", release.tag_name);
+    println!("  The binary will be replaced after this process exits.");
     println!("  Backup of old version saved to: {}", backup_path.display());
 
     Ok(())
