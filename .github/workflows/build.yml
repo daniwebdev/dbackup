@@ -24,11 +24,11 @@ jobs:
             bin: dbackup
             name: dbackup-Linux-x86_64.tar.gz
             
-          - os_name: macOS-aarch64
-            os: macos-latest
-            target: aarch64-apple-darwin
+          - os_name: Linux-arm64
+            os: ubuntu-latest
+            target: aarch64-unknown-linux-musl
             bin: dbackup
-            name: dbackup-Darwin-aarch64.tar.gz
+            name: dbackup-Linux-arm64.tar.gz
 
     steps:
       - name: Checkout code
@@ -49,6 +49,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y musl-tools
+          if [ "${{ matrix.platform.target }}" = "aarch64-unknown-linux-musl" ]; then
+            sudo apt-get install -y gcc-aarch64-linux-gnu
+          fi
 
       - name: Extract version and build date
         id: version_info
@@ -79,6 +82,7 @@ jobs:
           GIT_VERSION: ${{ env.GIT_VERSION }}
           BUILD_DATE: ${{ env.BUILD_DATE }}
           CC_x86_64_unknown_linux_musl: x86_64-linux-musl-gcc
+          CC_aarch64_unknown_linux_musl: aarch64-linux-gnu-gcc
           CARGO_CFG_TARGET_FEATURE: crt-static
         run: |
           cargo build --release --target ${{ matrix.platform.target }} --verbose
@@ -124,5 +128,5 @@ jobs:
         with:
           files: |
             Linux-x86_64/dbackup-Linux-x86_64.tar.gz
-            macOS-aarch64/dbackup-Darwin-aarch64.tar.gz
+            Linux-arm64/dbackup-Linux-arm64.tar.gz
           generate_release_notes: true
