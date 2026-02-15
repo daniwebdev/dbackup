@@ -79,6 +79,7 @@ async fn main() -> Result<()> {
         .init();
 
     let cli = Cli::parse();
+    let git_version = GIT_VERSION_ENV.unwrap_or("develop");
 
     match cli.command {
         Commands::Backup { config, name } => {
@@ -97,10 +98,10 @@ async fn main() -> Result<()> {
             run_scheduled_backups(config_path, concurrency).await?;
         }
         Commands::Version => {
-            show_version().await;
+            show_version(git_version).await;
         }
         Commands::Update => {
-            updater::update_binary().await?;
+            updater::update_binary(git_version).await?;
         }
     }
 
@@ -290,8 +291,7 @@ backups:
     Ok(())
 }
 
-async fn show_version() {
-    let git_version = GIT_VERSION_ENV.unwrap_or("develop");
+async fn show_version(git_version: &str) {
     let build_date = BUILD_DATE_ENV.unwrap_or("unknown");
     
     if git_version == "develop" {

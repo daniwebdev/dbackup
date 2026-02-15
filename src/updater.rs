@@ -137,9 +137,24 @@ pub async fn check_and_show_update(current_version: &str) -> Result<()> {
     }
 }
 
-pub async fn update_binary() -> Result<()> {
+pub async fn update_binary(current_version: &str) -> Result<()> {
     let release = fetch_latest_release().await?;
     info!("Latest release: {}", release.tag_name);
+
+    // Check if we're already on the latest version
+    match version_compare(current_version, &release.tag_name) {
+        std::cmp::Ordering::Equal => {
+            println!("✓ Already running the latest version: {}", release.tag_name);
+            return Ok(());
+        }
+        std::cmp::Ordering::Greater => {
+            println!("✓ Current version ({}) is newer than latest release ({})", current_version, release.tag_name);
+            return Ok(());
+        }
+        std::cmp::Ordering::Less => {
+            info!("Newer version available: {} (current: {})", release.tag_name, current_version);
+        }
+    }
 
     let temp_dir = std::env::temp_dir();
     let archive_path = temp_dir.join("dbackup-update.tar.gz");
