@@ -15,6 +15,8 @@ use tracing_subscriber;
 // const VERSION: &str = env!("CARGO_PKG_VERSION");
 const BUILD_DATE_ENV: Option<&str> = option_env!("BUILD_DATE");
 const GIT_VERSION_ENV: Option<&str> = option_env!("GIT_VERSION");
+const DEFAULT_CONFIG_PATH: &str = "/etc/dbackup/backup.yml";
+const FALLBACK_CONFIG_PATH: &str = "backup.yml";
 
 #[derive(Parser)]
 #[command(name = "dbackup")]
@@ -28,9 +30,9 @@ struct Cli {
 enum Commands {
     /// Run a backup based on configuration file
     Backup {
-        /// Path to the configuration file
-        #[arg(short, long, default_value = "backup.yml")]
-        config: PathBuf,
+        /// Path to the configuration file (defaults to /etc/dbackup/backup.yml on Linux if available, otherwise backup.yml)
+        #[arg(short, long)]
+        config: Option<PathBuf>,
 
         /// Name of the backup to run (if not specified, runs all)
         #[arg(short, long)]
@@ -38,9 +40,9 @@ enum Commands {
     },
     /// Validate the configuration file
     Validate {
-        /// Path to the configuration file
-        #[arg(short, long, default_value = "backup.yml")]
-        config: PathBuf,
+        /// Path to the configuration file (defaults to /etc/dbackup/backup.yml on Linux if available, otherwise backup.yml)
+        #[arg(short, long)]
+        config: Option<PathBuf>,
     },
     /// Generate a sample configuration file
     Generate {
@@ -50,9 +52,9 @@ enum Commands {
     },
     /// Run scheduled backups (listens for cron schedules)
     Run {
-        /// Path to the configuration file
-        #[arg(short, long, default_value = "backup.yml")]
-        config: PathBuf,
+        /// Path to the configuration file (defaults to /etc/dbackup/backup.yml on Linux if available, otherwise backup.yml)
+        #[arg(short, long)]
+        config: Option<PathBuf>,
 
         /// Maximum number of concurrent backup jobs (default: 2)
         #[arg(short, long, default_value = "2")]
@@ -76,16 +78,19 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Backup { config, name } => {
-            run_backup(config, name).await?;
+            let config_path = resolve_config_path(config)?;
+            run_backup(config_path, name).await?;
         }
         Commands::Validate { config } => {
-            validate_config(config)?;
+            let config_path = resolve_config_path(config)?;
+            validate_config(config_path)?;
         }
         Commands::Generate { output } => {
             generate_sample_config(output)?;
         }
         Commands::Run { config, concurrency } => {
-            run_scheduled_backups(config, concurrency).await?;
+            let config_path = resolve_config_path(config)?;
+            run_scheduled_backups(config_path, concurrency).await?;
         }
         Commands::Version => {
             show_version();
@@ -93,6 +98,36 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn resolve_config_path(explicit_config: Option<PathBuf>) -> Result<PathBuf> {
+    // If config is explicitly provided via -c flag, use it (forced)
+    if let Some(config) = explicit_config {
+        return Ok(config);
+    }
+
+    // On Linux, check if default config exists at /etc/dbackup/backup.yml
+    #[cfg(target_os = "linux")]
+    {
+        let default_path = PathBuf::from(DEFAULT_CONFIG_PATH);
+        if default_path.exists() {
+            info!("Using default configuration from: {}", DEFAULT_CONFIG_PATH);
+            return Ok(default_path);
+        }
+    }
+
+    // Fallback to backup.yml in current directory
+    let fallback_path = PathBuf::from(FALLBACK_CONFIG_PATH);
+    if fallback_path.exists() {
+        info!("Using configuration from: {}", FALLBACK_CONFIG_PATH);
+        Ok(fallback_path)
+    } else {
+        anyhow::bail!(
+            "Configuration file not found. Tried: {} and {}",
+            DEFAULT_CONFIG_PATH,
+            FALLBACK_CONFIG_PATH
+        )
+    }
 }
 
 async fn run_backup(config_path: PathBuf, backup_name: Option<String>) -> Result<()> {
