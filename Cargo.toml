@@ -10,8 +10,8 @@ description = "A robust database backup utility with PostgreSQL support"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_yaml = "0.9.34"
 
-# Async runtime
-tokio = { version = "1.49.0", features = ["full"] }
+# Async runtime (minimal features for smaller binary)
+tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "io-util", "time", "process", "sync", "fs"] }
 
 # Date and time
 chrono = "0.4.43"
@@ -44,7 +44,15 @@ async-trait = "0.1.80"
 # UUID for temporary file names
 uuid = { version = "1.10.0", features = ["v4"] }
 
-# AWS S3 for cloud storage
-aws-config = "1.5.0"
-aws-sdk-s3 = "1.46.0"
-aws-smithy-runtime = "1.7.0"
+# AWS S3 for cloud storage (with reduced features for smaller binary)
+aws-config = { version = "1.5.0", default-features = false, features = ["behavior-version-latest"] }
+aws-sdk-s3 = { version = "1.46.0", default-features = false, features = ["behavior-version-latest"] }
+aws-smithy-runtime = { version = "1.7.0", default-features = false }
+
+# Release build optimizations for smaller binary
+[profile.release]
+opt-level = 3           # Maximum optimization
+lto = true              # Link-time optimization
+codegen-units = 1       # Better optimization (slower compile)
+strip = true            # Strip debug symbols automatically
+panic = "abort"         # Smaller panic handler
