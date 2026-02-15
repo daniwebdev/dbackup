@@ -53,6 +53,8 @@ pub struct BackupConfig {
     pub parallel_jobs: u8,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub binary_path: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retention: Option<String>,  // e.g., "7d", "30d", "1w", "2mon", "1y"
 }
 
 fn default_parallel_jobs() -> u8 {

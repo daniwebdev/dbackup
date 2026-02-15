@@ -162,7 +162,7 @@ impl BackupScheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{BackupMode, ConnectionConfig, ScheduleConfig, StorageConfig};
+    use crate::config::{BackupMode, ConnectionConfig, ScheduleConfig, StorageConfig, StorageSelection, StorageReference};
     use std::path::PathBuf;
 
     fn create_test_backup_with_schedule() -> BackupConfig {
@@ -180,14 +180,21 @@ mod tests {
             schedule: Some(ScheduleConfig {
                 cron: "0 2 * * *".to_string(), // Daily at 2 AM
             }),
-            storage: StorageConfig {
+            storage: Some(StorageSelection::Inline(StorageConfig {
                 driver: "local".to_string(),
-                path: PathBuf::from("/tmp/backups"),
-                filename_prefix: "test_".to_string(),
-            },
+                path: Some(PathBuf::from("/tmp/backups")),
+                filename_prefix: Some("test_".to_string()),
+                bucket: None,
+                region: None,
+                prefix: None,
+                endpoint: None,
+                access_key_id: None,
+                secret_access_key: None,
+            })),
             mode: BackupMode::Basic,
             parallel_jobs: 2,
             binary_path: None,
+            retention: None,
         }
     }
 

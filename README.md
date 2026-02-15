@@ -752,12 +752,128 @@ Common examples:
 - `*/30 * * * *` - Every 30 minutes
 - `0 2,14 * * *` - At 2 AM and 2 PM daily
 
-## 🗺️ Roadmap
+## �️ Retention Policies
+
+DBackup supports automatic cleanup of old backup files based on configurable retention policies. This helps manage storage costs and maintains disk space.
+
+### Retention Policy Format
+
+Retention policies use simple, human-readable duration strings:
+
+- **Seconds**: `30s`, `60s`, `120s`
+- **Minutes**: `5m`, `30m`, `60min`
+- **Hours**: `1h`, `2hour`, `24hours`
+- **Days**: `1d`, `7d`, `30day`
+- **Weeks**: `1w`, `2week`, `4weeks`
+- **Months**: `1mon`, `3month`, `12months`
+- **Years**: `1y`, `2year`
+
+### Configuration Example
+
+Add the `retention` field to any backup configuration:
+
+```yaml
+settings:
+  binary:
+    pg_dump: /usr/bin/pg_dump
+  
+  storages:
+    local_backup:
+      driver: local
+      path: "/var/backups/databases"
+      filename_prefix: "backup_"
+    
+    s3_backup:
+      driver: s3
+      bucket: my-backups
+      region: us-east-1
+      prefix: postgresql/
+
+backups:
+  - name: "Daily Production Backup"
+    driver: postgresql
+    connection:
+      host: localhost
+      port: 5432
+      username: postgres
+      password: secret
+      database: prod_db
+    mode: parallel
+    parallel_jobs: 4
+    schedule:
+      cron: "0 2 * * *"  # Daily at 2 AM
+    storage:
+      ref: local_backup
+    retention: "30d"  # Keep backups for 30 days
+
+  - name: "Weekly Archive Backup"
+    driver: postgresql
+    connection:
+      host: localhost
+      port: 5432
+      username: postgres
+      password: secret
+      database: prod_db
+    mode: parallel
+    parallel_jobs: 4
+    schedule:
+      cron: "0 0 * * 0"  # Weekly on Sunday
+    storage:
+      ref: s3_backup
+    retention: "1y"  # Keep weekly backups for 1 year
+
+  - name: "Hourly Backup (Short Retention)"
+    driver: postgresql
+    connection:
+      host: localhost
+      port: 5432
+      username: postgres
+      password: secret
+      database: analytics_db
+    mode: basic
+    schedule:
+      cron: "0 * * * *"  # Every hour
+    storage:
+      ref: local_backup
+      prefix: "analytics/"
+    retention: "7d"  # Keep hourly backups for 7 days only
+```
+
+### How Retention Works
+
+1. **Local Storage**: Files older than the retention period are deleted from the filesystem
+2. **S3 Storage**: Objects (files) older than the retention period are deleted from the S3 bucket
+3. **Cleanup happens**: When the backup job completes, old backups are automatically removed
+4. **Safe deletion**: Only backups matching the storage prefix are considered for deletion
+
+### Retention Policy Examples
+
+| Policy | Duration | Use Case |
+|--------|----------|----------|
+| `7d` | 7 days | Short-term local backups |
+| `30d` | 30 days | Monthly rotation |
+| `90d` | 90 days | Quarterly backups |
+| `1y` | 1 year | Archive/long-term backups |
+| `2w` | 2 weeks | Development/test environments |
+| `1mon` | ~30 days | Monthly archive |
+| `3mon` | ~90 days | Quarterly compliance |
+
+### Best Practices
+
+1. **Local Storage**: Shorter retention (7-30 days) to save disk space
+2. **S3 Storage**: Longer retention (30-365 days) since cloud storage is cheaper
+3. **Multiple Backups**: Use different retention for different backup frequencies
+   - Hourly backups: 7 days
+   - Daily backups: 30 days
+   - Weekly backups: 1 year
+4. **Compliance**: Set retention to match your compliance requirements
+
+## �🗺️ Roadmap
 
 - [x] **Scheduled Backups**: Implement cron-based scheduling ✅ DONE
 - [x] **S3 Storage**: Add support for S3-compatible cloud storage ✅ DONE
+- [x] **Retention Policies**: Automatic cleanup of old backups ✅ DONE
 - [ ] **MySQL Support**: Add MySQL/MariaDB backup support
-- [ ] **Retention Policies**: Automatic cleanup of old backups
 - [ ] **Encryption**: Add encryption for backup files
 - [ ] **Notifications**: Email/Slack notifications for backup status
 - [ ] **Incremental Backups**: Support for incremental backup strategies

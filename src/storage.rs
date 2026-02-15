@@ -127,6 +127,76 @@ impl S3Storage {
             client,
         })
     }
+    
+    /// Delete old backups based on retention duration
+    pub async fn cleanup_old_backups(&self, retention_duration: &std::time::Duration) -> Result<()> {
+        use std::time::SystemTime;
+        
+        info!("Listing objects in bucket: {}, prefix: {}", self.bucket, self.prefix);
+        
+        let now = SystemTime::now();
+        let cutoff_time = now - *retention_duration;
+        
+        let mut deleted_count = 0;
+        let mut continuation_token: Option<String> = None;
+        
+        loop {
+            let mut list_request = self.client
+                .list_objects_v2()
+                .bucket(&self.bucket)
+                .prefix(&self.prefix);
+            
+            if let Some(token) = continuation_token {
+                list_request = list_request.continuation_token(token);
+            }
+            
+            let response = list_request
+                .send()
+                .await
+                .context("Failed to list S3 objects")?;
+            
+            // Process files
+            let contents = response.contents();
+            for obj in contents {
+                if let Some(last_modified) = obj.last_modified() {
+                    // Convert AWS DateTime to SystemTime
+                    // AWS DateTime is Unix timestamp, convert via u64
+                    let timestamp_secs = last_modified.secs();
+                    let nanos = last_modified.subsec_nanos();
+                    let obj_time = SystemTime::UNIX_EPOCH + std::time::Duration::new(timestamp_secs as u64, nanos);
+                    
+                    if obj_time < cutoff_time {
+                        if let Some(key) = obj.key() {
+                            match self.client
+                                .delete_object()
+                                .bucket(&self.bucket)
+                                .key(key)
+                                .send()
+                                .await {
+                                Ok(_) => {
+                                    info!("Deleted old S3 object: s3://{}/{}", self.bucket, key);
+                                    deleted_count += 1;
+                                }
+                                Err(e) => {
+                                    debug!("Failed to delete S3 object {}: {}", key, e);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Check if there are more results
+            if response.is_truncated().unwrap_or(false) {
+                continuation_token = response.next_continuation_token().map(|s| s.to_string());
+            } else {
+                break;
+            }
+        }
+        
+        info!("S3 retention cleanup removed {} object(s)", deleted_count);
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]

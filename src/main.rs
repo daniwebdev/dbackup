@@ -3,6 +3,7 @@ mod postgres;
 mod scheduler;
 mod updater;
 mod storage;
+mod retention;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
