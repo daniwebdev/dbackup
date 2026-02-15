@@ -320,6 +320,7 @@ mod tests {
             mode: BackupMode::Basic,
             parallel_jobs: 2,
             binary_path: None,
+            retention: None,
         };
 
         let storage_config = StorageConfig {
