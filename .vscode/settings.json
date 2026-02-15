@@ -1,5 +1,16 @@
 {
     "chat.tools.terminal.autoApprove": {
         "cargo build": true
-    }
+    },
+    // Required: Your S3-compatible endpoint
+    "s3x.endpointUrl": "http://localhost:3900",
+    // Required: Your access credentials
+    "s3x.accessKeyId": "GK23234419e9de9ca97979966a",
+    "s3x.secretAccessKey": "w2c0b81e4db07dcf680739a08b26cdc3d37161db8fb86d0198d4b4559c73688ea",
+    // Required for R2: Use path-style URLs
+    "s3x.forcePathStyle": true,
+    // Optional: Region (R2 works with us-east-1)
+    "s3x.region": "garage",
+    // Optional: Max file size for direct editing (default: 10MB)
+    "s3x.maxPreviewSizeBytes": 10485760
 }

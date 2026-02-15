@@ -1,0 +1,78 @@
+# Database Backup Configuration
+
+settings:
+  binary:
+    # Optional: Specify full paths to backup binaries
+    # If not specified, the tool will use the binary from PATH
+    pg_dump: /usr/bin/pg_dump
+    mysqldump: /usr/bin/mysqldump
+  
+  # Define reusable storage configurations
+  storages:
+    local_backup:
+      driver: local
+      path: "/var/backups/databases/postgresql"
+      filename_prefix: "backup_"
+    
+    s3_aws:
+      driver: s3
+      bucket: my-backup-bucket
+      region: us-east-1
+      prefix: backups/postgresql/
+      # Optional: For S3-compatible services (MinIO, etc.)
+      # endpoint: https://minio.example.com:9000
+      # Optional: Credentials (uses AWS SDK environment variables if not specified)
+      # access_key_id: AKIAIOSFODNN7EXAMPLE
+      # secret_access_key: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+    
+    s3_minio:
+      driver: s3
+      bucket: backups
+      region: us-east-1
+      prefix: postgresql/
+      endpoint: http://minio.example.com:9000
+      access_key_id: minioadmin
+      secret_access_key: minioadmin
+
+backups:
+  - name: "Production PostgreSQL - Local"
+    driver: postgresql
+    connection:
+      host: localhost
+      port: 5432
+      username: postgres
+      password: your_password_here
+      database: production_db
+    mode: parallel
+    parallel_jobs: 4
+    schedule:
+      cron: "0 2 * * *"  # Daily at 2 AM
+    storage:
+      ref: local_backup  # Reference the storage config above
+
+  - name: "Production PostgreSQL - S3 AWS"
+    driver: postgresql
+    connection:
+      host: localhost
+      port: 5432
+      username: postgres
+      password: your_password_here
+      database: production_db
+    mode: parallel
+    parallel_jobs: 4
+    schedule:
+      cron: "0 3 * * *"  # Daily at 3 AM
+    storage:
+      ref: s3_aws  # Reference the S3 storage config
+
+  - name: "Development PostgreSQL - MinIO"
+    driver: postgresql
+    connection:
+      host: localhost
+      port: 5432
+      username: postgres
+      password: your_password_here
+      database: dev_db
+    mode: basic
+    storage:
+      ref: s3_minio  # Reference the MinIO storage config

@@ -11,7 +11,8 @@ A robust, high-performance PostgreSQL database backup utility written in **Rust*
   - **Parallel Mode**: Multi-threaded backups for faster processing of large databases
 - **Scheduled Backups**: Cron-based scheduling with concurrent execution
 - **Systemd Integration**: Run as a service with automatic restart and resource limits
-- **Flexible Storage**: Backup to local filesystems with automatic compression
+- **Flexible Storage**: Backup to local filesystems or S3-compatible cloud storage
+- **S3 Storage Support**: Amazon S3 and S3-compatible services (MinIO, DigitalOcean Spaces, etc.)
 - **High-Efficiency Compression**: Automatically applies optimal compression to minimize storage usage
 - **Robust Error Handling**: Comprehensive error reporting and validation
 - **Memory Efficient**: Streaming I/O, concurrent jobs with semaphore-based limits
@@ -131,6 +132,20 @@ settings:
     pg_dump: /usr/bin/pg_dump
     mysqldump: /usr/bin/mysqldump
 
+  # Define reusable storage configurations (NEW!)
+  # Each backup references a storage by key, making configs DRY
+  storages:
+    local_backup:
+      driver: local
+      path: "/var/backups/databases/postgresql"
+      filename_prefix: "backup_"
+    
+    s3_prod:
+      driver: s3
+      bucket: my-production-backups
+      region: us-east-1
+      prefix: postgresql/prod/
+
 backups:
   - name: "Production PostgreSQL Database"
     driver: postgresql
@@ -145,11 +160,30 @@ backups:
     # Number of parallel jobs (only for parallel mode)
     parallel_jobs: 4
     schedule:
-      cron: "0 2 * * *"  # Daily at 2 AM (not yet implemented)
+      cron: "0 2 * * *"  # Daily at 2 AM
+    # Storage reference - can override prefix/filename_prefix
     storage:
-      driver: local
-      path: "/var/backups/databases/postgresql"
-      filename_prefix: "prod_"
+      ref: local_backup
+      # Optional: Override path prefix or filename prefix
+      # prefix: "/custom/backup/path"
+      # filename_prefix: "custom_"
+
+  - name: "Production PostgreSQL to S3"
+    driver: postgresql
+    connection:
+      host: localhost
+      port: 5432
+      username: postgres
+      password: your_password_here
+      database: production_db
+    mode: parallel
+    parallel_jobs: 4
+    schedule:
+      cron: "0 3 * * *"  # Daily at 3 AM
+    # Storage reference with custom S3 path prefix
+    storage:
+      ref: s3_prod
+      prefix: postgresql/prod/daily/  # Override S3 path for daily backups
 ```
 
 ### Configuration Options
@@ -198,13 +232,312 @@ backups:
 
 #### Storage Settings
 
-- `driver`: Storage driver type (currently supports "local")
+The tool supports two approaches to define storage:
+
+**Approach 1: Centralized Storage Configuration (Recommended)**
+
+Define reusable storage configurations under `settings.storages` and reference them via `storage` object:
+
+```yaml
+settings:
+  storages:
+    local:
+      driver: local
+      path: "/var/backups"
+      filename_prefix: "backup_"
+    
+    s3_prod:
+      driver: s3
+      bucket: my-bucket
+      region: us-east-1
+      prefix: backups/
+
+backups:
+  - name: MyBackup
+    # ... other config ...
+    storage:
+      ref: local  # Reference the storage above
+```
+
+Benefits:
+- DRY principle: Define storage once, use in multiple backups
+- Easy maintenance: Change one storage config, all backups using it update automatically
+- Clear organization: All storage settings in one place
+
+**Approach 2: Inline Storage Configuration (Backward Compatible)**
+
+Define storage directly in each backup config:
+
+```yaml
+backups:
+  - name: MyBackup
+    # ... other config ...
+    storage:
+      driver: local
+      path: "/var/backups"
+      filename_prefix: "backup_"
+```
+
+**Storage Configuration Options:**
+
+For **local** storage (via `storage` object or inline):
+- `driver: "local"`
 - `path`: Directory where backups will be stored
 - `filename_prefix`: Prefix for backup filenames (timestamp will be appended)
+
+For **S3** storage (via `storage` object or inline):
+- `driver: "s3"`
+- `bucket`: S3 bucket name (required)
+- `region`: AWS region (required, e.g., "us-east-1")
+- `prefix`: Key prefix for backups in S3 (optional, default: "backups/")
+- `endpoint`: Custom endpoint for S3-compatible services (optional)
+- `access_key_id`: AWS access key (optional, uses AWS SDK env vars if not specified)
+- `secret_access_key`: AWS secret key (optional, uses AWS SDK env vars if not specified)
 
 #### Schedule Settings (Future Feature)
 
 - `cron`: Cron expression for scheduled backups (not yet implemented)
+
+## ☁️ Centralized Storage Configuration
+
+DBackup supports **centralized storage configuration** in the `settings.storages` section, allowing you to define reusable storage profiles that multiple backups can reference. This is the **recommended approach** for managing multiple backups efficiently.
+
+### Benefits
+
+1. **DRY Principle**: Define storage configuration once
+2. **Easy Maintenance**: Update storage settings in one place
+3. **Reusability**: Multiple backups can share the same storage
+4. **Clear Organization**: All storage settings centralized in settings section
+
+### Example: Multiple Backups Using Same Storage
+
+```yaml
+settings:
+  binary:
+    pg_dump: /usr/bin/pg_dump
+
+  storages:
+    local_backups:
+      driver: local
+      path: "/var/backups/postgresql"
+      filename_prefix: "backup_"
+    
+    s3_backups:
+      driver: s3
+      bucket: company-backups
+      region: us-east-1
+      prefix: postgresql/
+
+backups:
+  - name: "Production Database"
+    driver: postgresql
+    connection:
+      host: prod-db.internal
+      port: 5432
+      username: postgres
+      password: secret
+      database: prod_db
+    mode: parallel
+    parallel_jobs: 4
+    # Reference storage with optional prefix override
+    storage:
+      ref: s3_backups
+      # prefix: "prod-backups/  # Optional: override S3 prefix
+
+  - name: "Development Database"
+    driver: postgresql
+    connection:
+      host: dev-db.internal
+      port: 5432
+      username: postgres
+      password: secret
+      database: dev_db
+    mode: basic
+    storage:
+      ref: local_backups
+
+  - name: "Staging Database"
+    driver: postgresql
+    connection:
+      host: staging-db.internal
+      port: 5432
+      username: postgres
+      password: secret
+      database: staging_db
+    mode: parallel
+    parallel_jobs: 2
+    storage:
+      ref: s3_backups
+      prefix: staging-backups/  # Custom S3 path for staging
+```
+
+### Real-World Use Cases
+
+**Use Case 1: Hybrid Storage**
+- Development backups → Local storage
+- Production backups → S3 (remote, redundant)
+
+**Use Case 2: Multi-Region S3 Backups**
+```yaml
+settings:
+  storages:
+    s3_us_east:
+      driver: s3
+      bucket: backups-us-east
+      region: us-east-1
+      prefix: postgresql/
+    
+    s3_eu_west:
+      driver: s3
+      bucket: backups-eu-west
+      region: eu-west-1
+      prefix: postgresql/
+
+backups:
+  - name: "Backup to US"
+    driver: postgresql
+    connection:
+      host: db.example.com
+      port: 5432
+      username: postgres
+      password: secret
+      database: mydb
+    storage:
+      ref: s3_us_east
+  
+  - name: "Backup to EU"
+    driver: postgresql
+    connection:
+      host: db.example.com
+      port: 5432
+      username: postgres
+      password: secret
+      database: mydb
+    storage:
+      ref: s3_eu_west
+```
+
+**Use Case 3: MinIO for Development**
+```yaml
+settings:
+  storages:
+    minio_local:
+      driver: s3
+      bucket: backups
+      region: minio
+      endpoint: http://minio.local:9000
+      access_key_id: minioadmin
+      secret_access_key: minioadmin
+      prefix: dev-backups/
+
+backups:
+  - name: "Dev Database"
+    driver: postgresql
+    connection:
+      host: localhost
+      port: 5432
+      username: postgres
+      password: secret
+      database: devdb
+    storage:
+      ref: minio_local
+```
+
+## ☁️ S3 Storage Configuration
+
+The tool supports backing up directly to Amazon S3 or S3-compatible services like MinIO, DigitalOcean Spaces, and others.
+
+### AWS S3 Setup
+
+1. **Create S3 Bucket**: Create an S3 bucket for your backups
+   ```bash
+   aws s3api create-bucket --bucket my-backup-bucket --region us-east-1
+   ```
+
+2. **Configure AWS Credentials**: Use one of these methods:
+   - **Environment Variables** (recommended for containers):
+     ```bash
+     export AWS_ACCESS_KEY_ID="your_access_key"
+     export AWS_SECRET_ACCESS_KEY="your_secret_key"
+     export AWS_DEFAULT_REGION="us-east-1"
+     ```
+   - **AWS Credentials File** (~/.aws/credentials):
+     ```ini
+     [default]
+     aws_access_key_id = your_access_key
+     aws_secret_access_key = your_secret_key
+     ```
+   - **IAM Role** (when running on EC2): Attach an IAM role to your instance with S3 permissions
+
+3. **Configuration in backup.yml**:
+   ```yaml
+   storage:
+     driver: s3
+     bucket: my-backup-bucket
+     region: us-east-1
+     prefix: backups/postgresql/  # Optional prefix
+   ```
+
+### S3-Compatible Services (MinIO, DigitalOcean, etc.)
+
+For S3-compatible services, use the `endpoint` parameter:
+
+```yaml
+storage:
+  driver: s3
+  bucket: my-backup-bucket
+  region: us-east-1
+  prefix: backups/
+  endpoint: https://minio.example.com:9000
+  access_key_id: minioadmin
+  secret_access_key: minioadmin
+```
+
+### Example: Systemd Service with S3
+
+```yaml
+settings:
+  binary:
+    pg_dump: /usr/bin/pg_dump
+
+backups:
+  - name: "Daily Production Backup to S3"
+    driver: postgresql
+    connection:
+      host: localhost
+      port: 5432
+      username: postgres
+      password: your_password
+      database: production_db
+    mode: parallel
+    parallel_jobs: 4
+    schedule:
+      cron: "0 2 * * *"  # Daily at 2 AM
+    storage:
+      driver: s3
+      bucket: my-company-backups
+      region: us-east-1
+      prefix: postgresql/prod/
+```
+
+### S3 Backup Verification
+
+List your backups in S3:
+```bash
+aws s3 ls s3://my-backup-bucket/backups/postgresql/
+```
+
+Download a backup:
+```bash
+aws s3 cp s3://my-backup-bucket/backups/postgresql/prod_20260215_020000.dump.gz ./
+```
+
+Restore from S3:
+```bash
+# Download and restore
+aws s3 cp s3://my-backup-bucket/backups/postgresql/prod_20260215_020000.dump.gz - | \
+  gunzip | pg_restore -h localhost -U postgres -d production_db
+```
 
 ## 📁 Backup File Format
 
@@ -364,6 +697,17 @@ Edit `/etc/dbackup/backup.yml`:
 settings:
   binary:
     pg_dump: /usr/bin/pg_dump
+  
+  storages:
+    production_backups:
+      driver: local
+      path: "/var/backups/postgresql"
+      filename_prefix: "prod_"
+    
+    analytics_backups:
+      driver: local
+      path: "/var/backups/postgresql"
+      filename_prefix: "analytics_"
 
 backups:
   - name: "Daily Production Backup"
@@ -379,9 +723,7 @@ backups:
     schedule:
       cron: "0 2 * * *"  # Daily at 2 AM
     storage:
-      driver: local
-      path: "/var/backups/postgresql"
-      filename_prefix: "prod_"
+      ref: production_backups
 
   - name: "Hourly Analytics Backup"
     driver: postgresql
@@ -395,9 +737,7 @@ backups:
     schedule:
       cron: "0 * * * *"  # Every hour
     storage:
-      driver: local
-      path: "/var/backups/postgresql"
-      filename_prefix: "analytics_"
+      ref: analytics_backups
 ```
 
 ### Cron Expression Format
@@ -415,7 +755,7 @@ Common examples:
 ## 🗺️ Roadmap
 
 - [x] **Scheduled Backups**: Implement cron-based scheduling ✅ DONE
-- [ ] **S3 Storage**: Add support for S3-compatible cloud storage
+- [x] **S3 Storage**: Add support for S3-compatible cloud storage ✅ DONE
 - [ ] **MySQL Support**: Add MySQL/MariaDB backup support
 - [ ] **Retention Policies**: Automatic cleanup of old backups
 - [ ] **Encryption**: Add encryption for backup files

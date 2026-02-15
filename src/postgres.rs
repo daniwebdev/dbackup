@@ -1,4 +1,5 @@
-use crate::config::BackupConfig;
+use crate::config::{BackupConfig, StorageConfig};
+use crate::storage;
 use anyhow::{Context, Result};
 use chrono::Local;
 use flate2::write::GzEncoder;
@@ -12,48 +13,74 @@ use tracing::{info, warn};
 
 pub struct PostgresBackup {
     config: BackupConfig,
+    storage_config: StorageConfig,
 }
 
 impl PostgresBackup {
-    pub fn new(config: BackupConfig) -> Self {
-        Self { config }
+    pub fn new(config: BackupConfig, storage_config: StorageConfig) -> Self {
+        Self { config, storage_config }
     }
 
-    pub async fn execute(&self) -> Result<PathBuf> {
+    pub async fn execute(&self) -> Result<String> {
         info!("Starting PostgreSQL backup for: {}", self.config.name);
 
         let timestamp = Local::now().format("%Y%m%d_%H%M%S");
         
-        // Ensure the output directory exists
-        std::fs::create_dir_all(&self.config.storage.path)
-            .context("Failed to create output directory")?;
+        // Create storage backend
+        let storage_backend = storage::create_storage(&self.storage_config).await?;
+        
+        // For local storage, ensure the output directory exists
+        if self.storage_config.driver.to_lowercase() == "local" {
+            let path = self.storage_config.path.as_ref()
+                .context("Local storage requires 'path' configuration")?;
+            std::fs::create_dir_all(path)
+                .context("Failed to create output directory")?;
+        }
+
+        // Create a temporary directory for the backup file
+        let temp_dir = std::env::temp_dir().join(format!("dbackup_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_dir)
+            .context("Failed to create temporary directory")?;
 
         // Execute backup based on mode
-        let output_path = match self.config.mode {
+        let (temp_file_path, filename) = match self.config.mode {
             crate::config::BackupMode::Basic => {
                 info!("Using basic mode (custom format with compression)...");
-                self.dump_basic(timestamp).await?
+                self.dump_basic(&temp_dir, timestamp).await?
             }
             crate::config::BackupMode::Parallel => {
                 info!(
                     "Using parallel mode (directory format with {} jobs)...",
                     self.config.parallel_jobs
                 );
-                self.dump_parallel(timestamp).await?
+                self.dump_parallel(&temp_dir, timestamp).await?
             }
         };
 
-        info!("Backup completed successfully: {}", output_path.display());
-        Ok(output_path)
+        // Move to final location or upload to S3
+        let final_location = if self.storage_config.driver.to_lowercase() == "local" {
+            // For local storage, file is already in the correct location
+            temp_file_path.display().to_string()
+        } else {
+            // For remote storage (S3), upload the file
+            storage_backend.store(&temp_file_path, &filename).await?
+        };
+
+        // Cleanup temporary directory
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        info!("Backup completed successfully: {}", final_location);
+        Ok(final_location)
     }
 
-    async fn dump_basic(&self, timestamp: impl std::fmt::Display) -> Result<PathBuf> {
+    async fn dump_basic(&self, temp_dir: &PathBuf, timestamp: impl std::fmt::Display) -> Result<(PathBuf, String)> {
         let conn = &self.config.connection;
         let filename = format!(
             "{}{}.dump.gz",
-            self.config.storage.filename_prefix, timestamp
+            self.storage_config.filename_prefix.as_ref().unwrap_or(&"backup_".to_string()),
+            timestamp
         );
-        let output_path = self.config.storage.path.join(&filename);
+        let output_path = temp_dir.join(&filename);
 
         info!("Backing up to: {}", output_path.display());
 
@@ -125,20 +152,32 @@ impl PostgresBackup {
             anyhow::bail!("pg_dump failed with status: {}", status);
         }
 
-        info!("Backup compressed to {}", output_path.display());
-        Ok(output_path)
+        if self.storage_config.driver.to_lowercase() == "local" {
+            // For local storage, move file to the final location
+            let final_path = self.storage_config.path.as_ref()
+                .context("Local storage requires 'path' configuration")?
+                .join(&filename);
+            std::fs::rename(&output_path, &final_path)
+                .context("Failed to move backup file to final location")?;
+            info!("Backup compressed to {}", final_path.display());
+            Ok((final_path, filename))
+        } else {
+            // For remote storage, keep in temp directory for upload
+            info!("Backup compressed to {}", output_path.display());
+            Ok((output_path, filename))
+        }
     }
 
-    async fn dump_parallel(&self, timestamp: impl std::fmt::Display) -> Result<PathBuf> {
+    async fn dump_parallel(&self, temp_dir: &PathBuf, timestamp: impl std::fmt::Display) -> Result<(PathBuf, String)> {
         let conn = &self.config.connection;
-        let basename = format!("{}{}", self.config.storage.filename_prefix, timestamp);
+        let basename = format!("{}{}", self.storage_config.filename_prefix.as_ref().unwrap_or(&"backup_".to_string()), timestamp);
         
         // Create temporary directory for directory format backup
-        let tmp_dir = std::env::temp_dir().join(&basename);
-        std::fs::create_dir_all(&tmp_dir)
+        let backup_tmp_dir = temp_dir.join(&basename);
+        std::fs::create_dir_all(&backup_tmp_dir)
             .context("Failed to create temporary directory")?;
 
-        info!("Using temporary directory: {}", tmp_dir.display());
+        info!("Using temporary directory: {}", backup_tmp_dir.display());
 
         // Determine pg_dump path
         let pg_dump_path = self.config.binary_path.as_ref()
@@ -160,7 +199,7 @@ impl PostgresBackup {
         // Directory format with parallel jobs
         cmd.arg("-Fd"); // Directory format
         cmd.arg("-j").arg(self.config.parallel_jobs.to_string()); // Parallel jobs
-        cmd.arg("-f").arg(&tmp_dir); // Output directory
+        cmd.arg("-f").arg(&backup_tmp_dir); // Output directory
         cmd.arg("--no-owner");
         cmd.arg("--verbose");
 
@@ -187,23 +226,35 @@ impl PostgresBackup {
             }
             
             // Cleanup temp directory on failure
-            let _ = std::fs::remove_dir_all(&tmp_dir);
+            let _ = std::fs::remove_dir_all(&backup_tmp_dir);
             anyhow::bail!("pg_dump failed with status: {}", status);
         }
 
         // Compress the directory into a tar.gz file
         let tar_filename = format!("{}.dir.tar.gz", basename);
-        let tar_path = self.config.storage.path.join(&tar_filename);
+        let tar_path = temp_dir.join(&tar_filename);
 
         info!("Compressing directory backup to {}", tar_path.display());
-        self.compress_directory(&tmp_dir, &tar_path).await?;
+        self.compress_directory(&backup_tmp_dir, &tar_path).await?;
 
-        // Cleanup temporary directory
-        std::fs::remove_dir_all(&tmp_dir)
+        // Cleanup the backup directory
+        std::fs::remove_dir_all(&backup_tmp_dir)
             .context("Failed to remove temporary directory")?;
 
-        info!("Backup compressed to {}", tar_path.display());
-        Ok(tar_path)
+        if self.storage_config.driver.to_lowercase() == "local" {
+            // For local storage, move file to the final location
+            let final_path = self.storage_config.path.as_ref()
+                .context("Local storage requires 'path' configuration")?
+                .join(&tar_filename);
+            std::fs::rename(&tar_path, &final_path)
+                .context("Failed to move backup file to final location")?;
+            info!("Backup compressed to {}", final_path.display());
+            Ok((final_path, tar_filename))
+        } else {
+            // For remote storage, keep in temp directory for upload
+            info!("Backup compressed to {}", tar_path.display());
+            Ok((tar_path, tar_filename))
+        }
     }
 
     async fn compress_directory(&self, source_dir: &PathBuf, output_path: &PathBuf) -> Result<()> {
@@ -245,12 +296,11 @@ impl PostgresBackup {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::StorageConfig;
 
-    fn create_test_config() -> BackupConfig {
-        use crate::config::{BackupMode, ConnectionConfig};
+    fn create_test_config() -> (BackupConfig, StorageConfig) {
+        use crate::config::{BackupMode, ConnectionConfig, StorageSelection, StorageReference};
         
-        BackupConfig {
+        let backup_config = BackupConfig {
             name: "test_backup".to_string(),
             driver: "postgresql".to_string(),
             connection: ConnectionConfig {
@@ -262,29 +312,43 @@ mod tests {
                 database: "testdb".to_string(),
             },
             schedule: None,
-            storage: StorageConfig {
-                driver: "local".to_string(),
-                path: PathBuf::from("/tmp/backups"),
-                filename_prefix: "test_".to_string(),
-            },
+            storage: Some(StorageSelection::Reference(StorageReference {
+                r#ref: "test_storage".to_string(),
+                prefix: None,
+                filename_prefix: None,
+            })),
             mode: BackupMode::Basic,
             parallel_jobs: 2,
             binary_path: None,
-        }
+        };
+
+        let storage_config = StorageConfig {
+            driver: "local".to_string(),
+            path: Some(PathBuf::from("/tmp/backups")),
+            filename_prefix: Some("test_".to_string()),
+            bucket: None,
+            region: None,
+            prefix: None,
+            endpoint: None,
+            access_key_id: None,
+            secret_access_key: None,
+        };
+
+        (backup_config, storage_config)
     }
 
     #[test]
     fn test_validate_connection() {
-        let config = create_test_config();
-        let backup = PostgresBackup::new(config);
+        let (config, storage_config) = create_test_config();
+        let backup = PostgresBackup::new(config, storage_config);
         assert!(backup.validate_connection().is_ok());
     }
 
     #[test]
     fn test_validate_connection_empty_host() {
-        let mut config = create_test_config();
+        let (mut config, storage_config) = create_test_config();
         config.connection.host = "".to_string();
-        let backup = PostgresBackup::new(config);
+        let backup = PostgresBackup::new(config, storage_config);
         assert!(backup.validate_connection().is_err());
     }
 }

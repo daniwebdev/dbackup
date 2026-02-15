@@ -37,3 +37,14 @@ clap = { version = "4.5.58", features = ["derive"] }
 # HTTP requests for updates (using rustls for zero system dependencies)
 reqwest = { version = "0.12.10", features = ["json", "rustls-tls"], default-features = false }
 serde_json = "1.0.133"
+
+# Async traits
+async-trait = "0.1.80"
+
+# UUID for temporary file names
+uuid = { version = "1.10.0", features = ["v4"] }
+
+# AWS S3 for cloud storage
+aws-config = "1.5.0"
+aws-sdk-s3 = "1.46.0"
+aws-smithy-runtime = "1.7.0"

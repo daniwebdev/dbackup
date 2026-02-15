@@ -2,6 +2,7 @@ mod config;
 mod postgres;
 mod scheduler;
 mod updater;
+mod storage;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -163,15 +164,19 @@ async fn run_backup(config_path: PathBuf, backup_name: Option<String>) -> Result
     for backup_config in backups_to_run {
         match backup_config.driver.as_str() {
             "postgresql" => {
-                let backup = PostgresBackup::new(backup_config.clone());
+                // Resolve storage configuration
+                let storage_config = config.get_storage_for_backup(&backup_config)
+                    .context(format!("Failed to resolve storage for backup '{}'", backup_config.name))?;
+
+                let backup = PostgresBackup::new(backup_config.clone(), storage_config);
                 
                 // Validate connection before attempting backup
                 backup.validate_connection()
                     .context("Connection validation failed")?;
 
                 match backup.execute().await {
-                    Ok(path) => {
-                        info!("✓ Backup '{}' completed: {}", backup_config.name, path.display());
+                    Ok(location) => {
+                        info!("✓ Backup '{}' completed: {}", backup_config.name, location);
                     }
                     Err(e) => {
                         error!("✗ Backup '{}' failed: {}", backup_config.name, e);
@@ -202,7 +207,11 @@ fn validate_config(config_path: PathBuf) -> Result<()> {
 
         match backup_config.driver.as_str() {
             "postgresql" => {
-                let backup = PostgresBackup::new(backup_config.clone());
+                // Resolve storage configuration
+                let storage_config = config.get_storage_for_backup(backup_config)
+                    .context(format!("Failed to resolve storage for backup '{}'", backup_config.name))?;
+
+                let backup = PostgresBackup::new(backup_config.clone(), storage_config);
                 backup.validate_connection()
                     .context(format!("Validation failed for backup '{}'", backup_config.name))?;
             }
@@ -245,9 +254,36 @@ settings:
     # If not specified, the tool will use the binary from PATH
     pg_dump: /usr/bin/pg_dump
     mysqldump: /usr/bin/mysqldump
+  
+  # Define reusable storage configurations
+  storages:
+    local_backup:
+      driver: local
+      path: "/var/backups/databases/postgresql"
+      filename_prefix: "backup_"
+    
+    s3_aws:
+      driver: s3
+      bucket: my-backup-bucket
+      region: us-east-1
+      prefix: backups/postgresql/
+      # Optional: For S3-compatible services (MinIO, etc.)
+      # endpoint: https://minio.example.com:9000
+      # Optional: Credentials (uses AWS SDK environment variables if not specified)
+      # access_key_id: AKIAIOSFODNN7EXAMPLE
+      # secret_access_key: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+    
+    s3_minio:
+      driver: s3
+      bucket: backups
+      region: us-east-1
+      prefix: postgresql/
+      endpoint: http://minio.example.com:9000
+      access_key_id: minioadmin
+      secret_access_key: minioadmin
 
 backups:
-  - name: "Production PostgreSQL Database"
+  - name: "Production PostgreSQL - Local"
     driver: postgresql
     connection:
       host: localhost
@@ -255,18 +291,32 @@ backups:
       username: postgres
       password: your_password_here
       database: production_db
-    # Backup mode: 'basic' (single-threaded, custom format) or 'parallel' (multi-threaded, directory format)
     mode: parallel
-    # Number of parallel jobs (only used in parallel mode, default: 2)
     parallel_jobs: 4
     schedule:
       cron: "0 2 * * *"  # Daily at 2 AM
+    # Reference centralized storage without custom prefix
     storage:
-      driver: local
-      path: "/var/backups/databases/postgresql"
-      filename_prefix: "prod_"
+      ref: local_backup
 
-  - name: "Development PostgreSQL Database"
+  - name: "Production PostgreSQL - S3 AWS"
+    driver: postgresql
+    connection:
+      host: localhost
+      port: 5432
+      username: postgres
+      password: your_password_here
+      database: production_db
+    mode: parallel
+    parallel_jobs: 4
+    schedule:
+      cron: "0 3 * * *"  # Daily at 3 AM
+    # Reference centralized storage with custom S3 prefix override
+    storage:
+      ref: s3_aws
+      prefix: prod-backups/daily/  # Override the S3 prefix for this backup
+
+  - name: "Development PostgreSQL - MinIO"
     driver: postgresql
     connection:
       host: localhost
@@ -274,12 +324,12 @@ backups:
       username: postgres
       password: your_password_here
       database: dev_db
-    # Using basic mode for smaller databases (mode is optional, defaults to 'basic')
     mode: basic
+    # Reference MinIO storage with custom filename prefix
     storage:
-      driver: local
-      path: "/var/backups/databases/postgresql"
-      filename_prefix: "dev_"
+      ref: s3_minio
+      filename_prefix: dev_
+      prefix: dev-backups/
 "#;
 
     std::fs::write(&output_path, sample_config)

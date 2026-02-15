@@ -55,11 +55,13 @@ impl BackupScheduler {
                 let backup = backup_config.clone();
                 let cron_expr = schedule.cron.clone();
                 let semaphore = self.semaphore.clone();
+                let config = self.config.clone();
 
                 let handle = tokio::spawn(Self::run_scheduled_backup(
                     backup,
                     cron_expr,
                     semaphore,
+                    config,
                 ));
 
                 handles.push(handle);
@@ -80,6 +82,7 @@ impl BackupScheduler {
         backup: BackupConfig,
         cron_expr: String,
         semaphore: std::sync::Arc<Semaphore>,
+        config: Config,
     ) -> Result<()> {
         let schedule = Schedule::from_str(&cron_expr)
             .context(format!("Invalid cron expression: {}", cron_expr))?;
@@ -114,25 +117,33 @@ impl BackupScheduler {
                 // Execute backup
                 match &backup.driver.as_str() {
                     &"postgresql" => {
-                        let backup_executor = PostgresBackup::new(backup.clone());
+                        // Resolve storage configuration
+                        match config.get_storage_for_backup(&backup) {
+                            Ok(storage_config) => {
+                                let backup_executor = PostgresBackup::new(backup.clone(), storage_config);
 
-                        // Validate connection first
-                        if let Err(e) = backup_executor.validate_connection() {
-                            error!("Connection validation failed for '{}': {}", backup.name, e);
-                            continue;
-                        }
+                                // Validate connection first
+                                if let Err(e) = backup_executor.validate_connection() {
+                                    error!("Connection validation failed for '{}': {}", backup.name, e);
+                                    continue;
+                                }
 
-                        // Run backup
-                        match backup_executor.execute().await {
-                            Ok(path) => {
-                                info!(
-                                    "✓ Scheduled backup '{}' completed: {}",
-                                    backup.name,
-                                    path.display()
-                                );
+                                // Run backup
+                                match backup_executor.execute().await {
+                                    Ok(location) => {
+                                        info!(
+                                            "✓ Scheduled backup '{}' completed: {}",
+                                            backup.name,
+                                            location
+                                        );
+                                    }
+                                    Err(e) => {
+                                        error!("✗ Scheduled backup '{}' failed: {}", backup.name, e);
+                                    }
+                                }
                             }
                             Err(e) => {
-                                error!("✗ Scheduled backup '{}' failed: {}", backup.name, e);
+                                error!("Failed to resolve storage for '{}': {}", backup.name, e);
                             }
                         }
                     }
