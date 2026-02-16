@@ -438,13 +438,20 @@ backups:
 
 async fn show_version(git_version: &str) {
     let build_date = BUILD_DATE_ENV.unwrap_or("unknown");
-    let pkg_version = VERSION;
     
-    println!("dbackup {}", pkg_version);
+    // Use git_version (from GitHub tag) if available, otherwise use package version
+    let version = if git_version != "develop" {
+        // Ensure version has 'v' prefix for GitHub tags
+        if git_version.starts_with('v') {
+            git_version.to_string()
+        } else {
+            format!("v{}", git_version)
+        }
+    } else {
+        format!("v{}", VERSION)
+    };
     
-    if git_version != "develop" && git_version != pkg_version {
-        println!("Release: {}", git_version);
-    }
+    println!("dbackup {}", version);
     
     if build_date != "unknown" {
         println!("Built: {}", build_date);
