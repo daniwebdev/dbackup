@@ -1,0 +1,343 @@
+---
+title: Scheduled Backups
+description: Automate backups with cron scheduling
+---
+
+# Scheduled Backups
+
+Automate your backups with cron expressions. DBackup handles scheduling automatically when running in daemon mode.
+
+## Basic Concept
+
+Instead of manually running backups, define a cron schedule and let DBackup run them automatically.
+
+```yaml
+backups:
+  - name: "Daily Backup"
+    driver: postgresql
+    connection: {...}
+    schedule:
+      cron: "0 2 * * *"  # Daily at 2 AM
+    storage: {...}
+```
+
+## Cron Expression Format
+
+DBackup uses standard cron syntax:
+
+```
+┌────────────── minute (0-59)
+│ ┌──────────── hour (0-23)
+│ │ ┌────────── day of month (1-31)
+│ │ │ ┌──────── month (1-12)
+│ │ │ │ ┌────── day of week (0-7) [0/7 = Sunday]
+│ │ │ │ │
+│ │ │ │ │
+* * * * *
+```
+
+## Common Schedules
+
+| Schedule | Expression | Use Case |
+|----------|-----------|----------|
+| **Every hour** | `0 * * * *` | Short-lived environments |
+| **Daily at 2 AM** | `0 2 * * *` | Standard daily backup |
+| **Daily at 2 & 8 PM** | `0 2,14 * * *` | Multiple daily backups |
+| **Every 6 hours** | `0 0,6,12,18 * * *` | High-frequency backups |
+| **Weekly Sunday** | `0 0 * * 0` | Weekly archive |
+| **First of month** | `0 0 1 * *` | Monthly backup |
+| **Weekdays only** | `0 2 * * 1-5` | Business days |
+| **Every 30 minutes** | `*/30 * * * *` | Real-time backup |
+
+## Setting Up Scheduled Backups
+
+### Step 1: Define Schedule in Config
+
+```yaml
+settings:
+  binary:
+    pg_dump: /usr/bin/pg_dump
+  
+  storages:
+    local_backup:
+      driver: local
+      path: /var/backups/postgresql
+      filename_prefix: backup_
+
+backups:
+  - name: "Production Database"
+    driver: postgresql
+    connection:
+      host: localhost
+      port: 5432
+      username: postgres
+      password: ${DB_PASSWORD}
+      database: production_db
+    mode: parallel
+    parallel_jobs: 4
+    schedule:
+      cron: "0 2 * * *"  # Daily at 2 AM
+    storage:
+      ref: local_backup
+    retention: "30d"
+```
+
+### Step 2: Run in Daemon Mode
+
+```bash
+# Start listening for scheduled backups
+dbackup run -c backup.yml
+
+# With custom concurrency (default: 2)
+dbackup run -c backup.yml --concurrency 4
+```
+
+### Step 3: Run with Systemd (Production)
+
+See [Systemd Setup](/docs/systemd-service) for complete instructions.
+
+## Concurrency
+
+Control how many backups can run simultaneously:
+
+```bash
+# Run with 4 concurrent jobs
+dbackup run -c backup.yml --concurrency 4
+
+# Default is 2
+dbackup run -c backup.yml
+```
+
+**Considerations:**
+- Higher concurrency = more resource usage
+- Set based on available CPU and memory
+- Monitor system during first run
+
+### Example: High-Frequency Backups
+
+```yaml
+backups:
+  - name: "Hourly Backup"
+    driver: postgresql
+    connection: {...}
+    schedule:
+      cron: "0 * * * *"  # Every hour
+    storage: {...}
+    retention: "7d"  # Keep for 1 week
+  
+  - name: "Daily Archive"
+    driver: postgresql
+    connection: {...}
+    schedule:
+      cron: "0 0 * * *"  # Daily at midnight
+    storage:
+      ref: s3_backups
+    retention: "90d"  # Keep for 3 months
+```
+
+Run with:
+```bash
+dbackup run -c backup.yml --concurrency 2
+```
+
+## Common Patterns
+
+### Daily Production Backup
+
+```yaml
+- name: "Daily Production"
+  driver: postgresql
+  schedule:
+    cron: "0 2 * * *"  # 2 AM daily
+  (...other config...)
+```
+
+### Multiple Daily Backups
+
+```yaml
+- name: "Backup (Morning)"
+  driver: postgresql
+  schedule:
+    cron: "0 2 * * *"  # 2 AM
+  (...other config...)
+
+- name: "Backup (Evening)"
+  driver: postgresql
+  schedule:
+    cron: "0 14 * * *"  # 2 PM
+  (...other config...)
+```
+
+### Weekday vs Weekend
+
+Production backups weekdays, less frequent on weekends:
+
+```yaml
+- name: "Weekday Backup"
+  driver: postgresql
+  schedule:
+    cron: "0 2 * * 1-5"  # Monday-Friday at 2 AM
+  storage:
+    ref: s3_prod
+  retention: "7d"
+
+- name: "Weekend Backup"
+  driver: postgresql
+  schedule:
+    cron: "0 2 * * 0,6"  # Saturday-Sunday at 2 AM
+  storage:
+    ref: s3_prod
+  retention: "30d"  # Keep longer
+```
+
+### Multiple Databases
+
+```yaml
+backups:
+  - name: "Production DB"
+    driver: postgresql
+    schedule:
+      cron: "0 2 * * *"  # 2 AM
+    storage: {...}
+
+  - name: "Analytics DB"
+    driver: postgresql
+    schedule:
+      cron: "0 3 * * *"  # 3 AM (staggered)
+    storage: {...}
+
+  - name: "Cache DB"
+    driver: postgresql
+    schedule:
+      cron: "0 * * * *"  # Every hour
+    storage: {...}
+```
+
+## Monitoring Scheduled Backups
+
+### Check Logs (Systemd)
+
+```bash
+# View recent logs
+journalctl -u dbackup -n 50
+
+# Follow logs in real-time
+journalctl -u dbackup -f
+
+# Logs from specific time
+journalctl -u dbackup --since "2026-02-18" --until "2026-02-19"
+```
+
+### Manual Testing
+
+Before relying on scheduled backups, test manually:
+
+```bash
+# Run single backup
+dbackup backup -c backup.yml -n "Production Database"
+
+# Check the result
+ls -lh /var/backups/postgresql/
+```
+
+### Verify Backups
+
+```bash
+# List all backup files
+ls -lh /var/backups/postgresql/
+
+# Check file size
+du -h /var/backups/postgresql/*
+
+# Verify backup integrity (PostgreSQL)
+tar -tzf backup_*.dir.tar.gz | head  # For parallel mode
+```
+
+## Troubleshooting Schedules
+
+### Backup Not Running
+
+1. **Check if daemon is running:**
+   ```bash
+   systemctl status dbackup
+   ```
+
+2. **Validate cron expression:**
+   ```bash
+   dbackup validate -c backup.yml
+   ```
+
+3. **Check logs:**
+   ```bash
+   journalctl -u dbackup -f
+   ```
+
+4. **Test manually:**
+   ```bash
+   dbackup backup -c backup.yml -n "YourBackupName"
+   ```
+
+### Backup Running at Wrong Time
+
+1. **Verify cron expression** - Use an online cron validator
+2. **Check system time zone** - Cron uses system timezone
+3. **Check system time** - Ensure system clock is correct
+   ```bash
+   timedatectl  # Check time sync
+   ```
+
+### Resource Issues During Backup
+
+**Problem:** System running out of memory/CPU during backup
+
+**Solution:** Reduce concurrency:
+```bash
+dbackup run -c backup.yml --concurrency 1
+```
+
+Or adjust backup config:
+```yaml
+parallel_jobs: 2  # Reduce parallel jobs
+```
+
+## Best Practices
+
+✅ **Do's:**
+- Stagger backup times (don't run all at once)
+- Schedule during off-peak hours
+- Monitor backup logs regularly
+- Test restoration from backups
+- Set appropriate retention periods
+- Use different schedules for different environments
+
+❌ **Don'ts:**
+- Don't schedule too many concurrent backups
+- Don't backup to the same disk as the database
+- Don't ignore backup failures
+- Don't use very frequent backups without retention
+- Don't forget to monitor disk space
+
+## Advanced: Backup Dependencies
+
+You can use different concurrency for different backup priorities:
+
+```bash
+# Scenario 1: Run critical backups sequentially
+dbackup run -c backup.yml --concurrency 1
+
+# Scenario 2: Run non-critical backups concurrently
+dbackup run -c backup.yml --concurrency 4
+```
+
+Consider splitting configs by priority:
+
+```
+backups-critical.yml      # Run with --concurrency 1
+backups-noncritical.yml   # Run with --concurrency 4
+```
+
+---
+
+<Callout title="Next Step" type="tip">
+Once scheduling is working, set up [Systemd](/docs/systemd-service) to run DBackup as a persistent service.
+</Callout>

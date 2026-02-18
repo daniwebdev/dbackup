@@ -1,0 +1,509 @@
+---
+title: Running as Systemd Service
+description: Set up DBackup to run automatically as a systemd service
+---
+
+# Running DBackup as a Systemd Service
+
+Run DBackup as a systemd service to handle scheduled backups automatically with proper logging, restart policies, and resource management.
+
+## Overview
+
+A systemd service:
+- ✅ Starts automatically on system boot
+- ✅ Runs in the background continuously
+- ✅ Restarts on failure
+- ✅ Logs to journalctl (system logs)
+- ✅ Can be managed with `systemctl`
+- ✅ Integrates with system monitoring
+
+## Prerequisites
+
+- Linux system with systemd
+- DBackup binary installed
+- PostgreSQL client tools installed
+- Configuration file prepared
+
+## Installation Steps
+
+### Step 1: Install DBackup Binary
+
+Choose one method:
+
+**From source:**
+```bash
+git clone <repository-url>
+cd db-backup-tools
+cargo build --release
+sudo cp target/release/dbackup /usr/local/bin/
+sudo chmod +x /usr/local/bin/dbackup
+```
+
+**Verify installation:**
+```bash
+dbackup --version
+```
+
+### Step 2: Create Directories
+
+```bash
+# Create config directory
+sudo mkdir -p /etc/dbackup
+sudo chmod 750 /etc/dbackup
+
+# Create backup directory
+sudo mkdir -p /var/backups/postgresql
+sudo chmod 755 /var/backups/postgresql
+
+# Create state directory (for logs, temp files)
+sudo mkdir -p /var/lib/dbackup
+sudo chmod 755 /var/lib/dbackup
+
+# Create log directory
+sudo mkdir -p /var/log/dbackup
+sudo chmod 755 /var/log/dbackup
+```
+
+### Step 3: Setup Configuration
+
+Copy your configuration file to `/etc/dbackup/`:
+
+```bash
+sudo cp backup.yml /etc/dbackup/backup.yml
+sudo chmod 600 /etc/dbackup/backup.yml
+```
+
+**Edit configuration:**
+```bash
+sudo nano /etc/dbackup/backup.yml
+```
+
+Ensure paths use absolute paths:
+```yaml
+settings:
+  storages:
+    local_backup:
+      driver: local
+      path: /var/backups/postgresql    # Use absolute path
+      filename_prefix: backup_
+```
+
+### Step 4: Create Systemd Service File
+
+Create `/etc/systemd/system/dbackup.service`:
+
+```bash
+sudo tee /etc/systemd/system/dbackup.service > /dev/null <<EOF
+[Unit]
+Description=DBackup Database Backup Service
+After=network.target
+Documentation=https://dbackup.example.com/docs
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/var/lib/dbackup
+ExecStart=/usr/local/bin/dbackup run -c /etc/dbackup/backup.yml
+Restart=always
+RestartSec=30
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=dbackup
+
+# Resource limits
+MemoryMax=4G
+CPUQuota=80%
+
+# Timeout
+TimeoutStopSec=300
+
+# Environment
+Environment="RUST_LOG=info"
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+### Step 5: Enable and Start Service
+
+```bash
+# Reload systemd configuration
+sudo systemctl daemon-reload
+
+# Enable service (start on boot)
+sudo systemctl enable dbackup.service
+
+# Start service now
+sudo systemctl start dbackup.service
+
+# Check status
+sudo systemctl status dbackup.service
+```
+
+**Expected output:**
+```
+● dbackup.service - DBackup Database Backup Service
+   Loaded: loaded (/etc/systemd/system/dbackup.service; enabled)
+   Active: active (running) since Mon 2026-02-18 15:45:00 UTC; 5min ago
+   Process: 31234 ExecStart=/usr/local/bin/dbackup run -c /etc/dbackup/backup.yml
+```
+
+### Step 6: Verify Service
+
+```bash
+# View recent logs
+journalctl -u dbackup.service -n 50
+
+# Follow logs in real-time
+journalctl -u dbackup.service -f
+
+# Check just today's logs
+journalctl -u dbackup.service --since today
+
+# Check for errors
+journalctl -u dbackup.service -p err
+```
+
+## Service Management
+
+### Check Status
+
+```bash
+systemctl status dbackup.service
+```
+
+### Start/Stop Service
+
+```bash
+# Start
+sudo systemctl start dbackup.service
+
+# Stop
+sudo systemctl stop dbackup.service
+
+# Restart
+sudo systemctl restart dbackup.service
+
+# Reload config without stopping
+sudo systemctl reload dbackup.service
+```
+
+### View Logs
+
+```bash
+# Last 50 lines
+journalctl -u dbackup.service -n 50
+
+# Follow in real-time (like tail -f)
+journalctl -u dbackup.service -f
+
+# Since specific time
+journalctl -u dbackup.service --since "2026-02-18 10:00:00"
+
+# Until specific time
+journalctl -u dbackup.service --until "2026-02-18 20:00:00"
+
+# By priority
+journalctl -u dbackup.service -p info  # info and above
+journalctl -u dbackup.service -p error # errors only
+```
+
+### Debugging
+
+Enable debug logging by editing the service file:
+
+```bash
+sudo systemctl edit dbackup.service
+```
+
+Change the line:
+```
+Environment="RUST_LOG=info"
+```
+
+To:
+```
+Environment="RUST_LOG=debug"
+```
+
+Then reload and restart:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart dbackup.service
+journalctl -u dbackup.service -f
+```
+
+## Complete Service File Example
+
+```ini
+[Unit]
+Description=DBackup Database Backup Service
+Documentation=https://dbackup.example.com/docs
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=postgres
+Group=postgres
+WorkingDirectory=/var/lib/dbackup
+
+# Main executable
+ExecStart=/usr/local/bin/dbackup run -c /etc/dbackup/backup.yml
+
+# Restart policy
+Restart=always
+RestartSec=30
+StartLimitInterval=600
+StartLimitBurst=3
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=dbackup
+
+# Resource limits
+MemoryMax=4G
+CPUQuota=80%
+MemoryAccounting=yes
+
+# Timeouts
+TimeoutStopSec=300
+
+# Environment variables
+Environment="RUST_LOG=info"
+Environment="AWS_DEFAULT_REGION=us-east-1"
+
+# Security (optional)
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=partial
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+## Advanced Configuration
+
+### Resource Limits
+
+Prevent backup jobs from consuming all system resources:
+
+```ini
+[Service]
+...
+# Memory limit
+MemoryMax=4G
+
+# CPU limit (80% of one core)
+CPUQuota=80%
+
+# File descriptor limit
+LimitNOFILE=65536
+```
+
+### Restart Policy
+
+Automatically restart on failure:
+
+```ini
+[Service]
+...
+Restart=always                  # Always restart
+RestartSec=30                   # Wait 30 seconds between restarts
+StartLimitInterval=600          # Time window for limit
+StartLimitBurst=3               # Max 3 restarts in window
+```
+
+### Dependencies
+
+Run after PostgreSQL:
+
+```ini
+[Unit]
+After=postgresql.service
+Wants=postgresql.service
+```
+
+### Multiple Configurations
+
+Run separate services for different configs:
+
+```bash
+# Create dbackup-prod.service for production
+sudo cp /etc/systemd/system/dbackup.service /etc/systemd/system/dbackup-prod.service
+
+# Edit dbackup-prod.service
+sudo nano /etc/systemd/system/dbackup-prod.service
+# Change: ExecStart=/usr/local/bin/dbackup run -c /etc/dbackup/backup-prod.yml
+
+# Do the same for dbackup-dev.service
+
+# Enable both
+sudo systemctl daemon-reload
+sudo systemctl enable dbackup-prod.service
+sudo systemctl enable dbackup-dev.service
+sudo systemctl start dbackup-prod.service
+sudo systemctl start dbackup-dev.service
+```
+
+## Monitoring
+
+### Check if Running
+
+```bash
+systemctl is-active dbackup.service
+# Output: active or inactive
+```
+
+### Monitor Resources
+
+```bash
+# Real-time monitoring
+systemctl status dbackup.service
+
+# Memory usage
+ps aux | grep dbackup
+
+# Check backup files are being created
+ls -lh /var/backups/postgresql/ | tail -5
+```
+
+### Email Alerts
+
+Configure systemd to send email on failures:
+
+```ini
+[Service]
+...
+OnFailure=notify-email@%n.service
+
+[Unit]
+# More at: man systemd.unit
+```
+
+### Verify Backups
+
+Add a simple check script:
+
+```bash
+#!/bin/bash
+# /usr/local/bin/check-dbackup.sh
+
+LOG="/var/log/dbackup-check.log"
+BACKUP_DIR="/var/backups/postgresql"
+
+echo "=== Backup Check ===" | tee -a "$LOG"
+echo "Time: $(date)" | tee -a "$LOG"
+
+# Check service status
+systemctl is-active dbackup.service | tee -a "$LOG"
+
+# Check if backups exist from today
+RECENT=$(find "$BACKUP_DIR" -mtime -1 -name "*.dump.gz" -o -name "*.dir.tar.gz" 2>/dev/null | wc -l)
+echo "Backups from today: $RECENT" | tee -a "$LOG"
+
+if [ "$RECENT" -eq 0 ]; then
+  echo "WARNING: No backups from today!" | tee -a "$LOG"
+  exit 1
+fi
+
+echo "✓ All checks passed" | tee -a "$LOG"
+```
+
+Make it executable:
+```bash
+sudo chmod +x /usr/local/bin/check-dbackup.sh
+```
+
+Add to crontab:
+```bash
+# Check daily at 11 AM
+0 11 * * * /usr/local/bin/check-dbackup.sh
+```
+
+## Troubleshooting Service
+
+### Service Won't Start
+
+```bash
+# Check syntax
+sudo systemctl daemon-reload
+
+# View error
+sudo systemctl status dbackup.service
+
+# Check logs
+journalctl -u dbackup.service -n 100
+```
+
+### Permission Denied
+
+```bash
+# Check file ownership
+ls -la /etc/dbackup/backup.yml
+ls -la /var/backups/postgresql/
+
+# Fix permissions
+sudo chown postgres:postgres /etc/dbackup/backup.yml
+sudo chmod 600 /etc/dbackup/backup.yml
+
+# Restart
+sudo systemctl restart dbackup.service
+```
+
+### Service Not Running After Reboot
+
+```bash
+# Check if enabled
+sudo systemctl is-enabled dbackup.service
+
+# If not enabled, enable it
+sudo systemctl enable dbackup.service
+
+# Check status
+sudo systemctl status dbackup.service
+```
+
+### High Memory/CPU Usage
+
+Reduce limits:
+
+```bash
+sudo systemctl edit dbackup.service
+
+# Modify:
+MemoryMax=2G        # Reduce from 4G
+CPUQuota=50%        # Reduce from 80%
+
+sudo systemctl daemon-reload
+sudo systemctl restart dbackup.service
+```
+
+## Uninstalling Service
+
+```bash
+# Stop service
+sudo systemctl stop dbackup.service
+
+# Disable on boot
+sudo systemctl disable dbackup.service
+
+# Remove service file
+sudo rm /etc/systemd/system/dbackup.service
+
+# Reload systemd
+sudo systemctl daemon-reload
+```
+
+---
+
+<Callout title="Pro Tip" type="info">
+Always test your configuration with `dbackup validate` before enabling the systemd service.
+</Callout>

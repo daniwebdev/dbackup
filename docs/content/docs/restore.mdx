@@ -1,0 +1,426 @@
+---
+title: Restoring Backups
+description: How to restore from DBackup backups
+---
+
+# Restoring Backups
+
+Learn how to restore your database from DBackup backups. The process depends on your backup mode.
+
+## Quick Restore
+
+### From Basic Mode Backup
+
+```bash
+# Simple restore
+pg_restore -h localhost -U postgres -d mydb backup_20260218_154530.dump.gz
+```
+
+### From Parallel Mode Backup
+
+```bash
+# Step 1: Extract archive
+tar -xzf backup_20260218_154530.dir.tar.gz -C /tmp/restore
+
+# Step 2: Restore with parallel jobs
+pg_restore -h localhost -U postgres -d mydb -j 4 -Fd /tmp/restore
+
+# Step 3: Cleanup
+rm -rf /tmp/restore
+```
+
+## Prerequisites
+
+Before restoring, you need:
+
+1. **PostgreSQL Client Tools** (pg_restore, psql)
+   ```bash
+   # For PostgreSQL
+   brew install postgresql  # macOS
+   apt-get install postgresql-client  # Ubuntu
+   ```
+
+2. **Backup File** (local or from S3)
+3. **Target Database** (empty or existing)
+4. **Access to Database Server**
+
+## Full Restore Guide
+
+### Step 1: Locate Your Backup
+
+#### From Local Storage
+
+```bash
+# List available backups
+ls -lh /var/backups/postgresql/
+
+# Find specific backup
+ls -lh /var/backups/postgresql/ | grep "20260218"
+```
+
+#### From S3
+
+```bash
+# List backups
+aws s3 ls s3://my-backups/postgresql/
+
+# Download backup
+aws s3 cp s3://my-backups/postgresql/backup_20260218_154530.dump.gz ./
+
+# Or download latest
+aws s3 cp s3://my-backups/postgresql/ ./ --recursive --exclude "*" --include "backup_*.dump.gz"
+```
+
+### Step 2: Verify Backup File
+
+```bash
+# Check file exists and is readable
+ls -lh backup_20260218_154530.dump.gz
+
+# For parallel mode, verify tar.gz integrity
+tar -tzf backup_20260218_154530.dir.tar.gz | head
+
+# For basic mode, check file type
+file backup_20260218_154530.dump.gz
+# Should show: gzip compressed data
+```
+
+### Step 3: Prepare Target Database
+
+#### Option A: Restore into Existing Database
+
+```bash
+# Drop existing database (if needed)
+psql -h localhost -U postgres -c "DROP DATABASE mydb;"
+
+# Create new empty database
+psql -h localhost -U postgres -c "CREATE DATABASE mydb;"
+```
+
+#### Option B: Restore into New Database
+
+```bash
+# Create new database
+psql -h localhost -U postgres -c "CREATE DATABASE mydb_restored;"
+```
+
+### Step 4: Restore Backup
+
+#### Basic Mode Restore
+
+```bash
+# Simple command (pg_restore handles .gz automatically)
+pg_restore -h localhost -U postgres -d mydb backup_20260218_154530.dump.gz
+
+# Or decompress first
+gunzip -c backup_20260218_154530.dump.gz | pg_restore -h localhost -U postgres -d mydb
+```
+
+**Detailed command:**
+
+```bash
+pg_restore \
+  -h localhost      \  # Database host
+  -p 5432           \  # Database port
+  -U postgres       \  # Database user
+  -d mydb           \  # Target database
+  -v                \  # Verbose output
+  backup_20260218_154530.dump.gz
+```
+
+#### Parallel Mode Restore
+
+```bash
+# Step 1: Extract the backup archive
+mkdir -p /tmp/restore_backup
+tar -xzf backup_20260218_154530.dir.tar.gz -C /tmp/restore_backup
+
+# Step 2: Restore with parallelization
+pg_restore \
+  -h localhost \
+  -U postgres \
+  -d mydb \
+  -j 4 \               # Use 4 parallel jobs
+  -Fd \               # Format: directory
+  /tmp/restore_backup
+
+# Step 3: Cleanup
+rm -rf /tmp/restore_backup
+```
+
+### Step 5: Verify Restore
+
+```bash
+# Check table count
+psql -h localhost -U postgres -d mydb -c "\dt"
+
+# Check row count
+psql -h localhost -U postgres -d mydb -c "SELECT relname, n_live_tup FROM pg_stat_user_tables ORDER BY relname;"
+
+# Run specific query
+psql -h localhost -U postgres -d mydb -c "SELECT COUNT(*) FROM your_table;"
+```
+
+## Common Restore Scenarios
+
+### Scenario 1: Restore to Same Server
+
+Restore to a different database name:
+
+```bash
+# Create restoration database
+psql -h localhost -U postgres -c "CREATE DATABASE mydb_restored;"
+
+# Restore backup
+pg_restore \
+  -h localhost \
+  -U postgres \
+  -d mydb_restored \
+  backup_20260218_154530.dump.gz
+
+# Verify
+psql -h localhost -U postgres -d mydb_restored -c "SELECT COUNT(*) FROM tables;" 
+
+# Rename if needed
+psql -h localhost -U postgres -c "ALTER DATABASE mydb RENAME TO mydb_old;"
+psql -h localhost -U postgres -c "ALTER DATABASE mydb_restored RENAME TO mydb;"
+```
+
+### Scenario 2: Restore to Different Server
+
+```bash
+# Connect to remote server
+pg_restore \
+  -h remote.database.com \
+  -p 5432 \
+  -U postgres \
+  -d mydb \
+  backup_20260218_154530.dump.gz
+```
+
+### Scenario 3: Restore Specific Tables Only
+
+```bash
+# List tables in backup
+pg_restore -l backup_20260218_154530.dump.gz | head
+
+# Restore specific table
+pg_restore \
+  -h localhost \
+  -U postgres \
+  -d mydb \
+  -t table_name \
+  backup_20260218_154530.dump.gz
+```
+
+### Scenario 4: Restore with Custom Options
+
+```bash
+# Skip indexes (restore data only)
+pg_restore \
+  -h localhost \
+  -U postgres \
+  -d mydb \
+  --no-indexes \
+  backup_20260218_154530.dump.gz
+
+# Restore schema only
+pg_restore \
+  -h localhost \
+  -U postgres \
+  -d mydb \
+  -s \  # Schema only
+  backup_20260218_154530.dump.gz
+
+# Restore data only
+pg_restore \
+  -h localhost \
+  -U postgres \
+  -d mydb \
+  -a \  # Data only
+  backup_20260218_154530.dump.gz
+```
+
+## Advanced Restore
+
+### Restore with Custom User
+
+```bash
+# Create user
+psql -h localhost -U postgres -c "CREATE USER restoreuser WITH PASSWORD 'password';"
+
+# Restore as user
+pg_restore \
+  -h localhost \
+  -U restoreuser \
+  -d mydb \
+  backup_20260218_154530.dump.gz
+```
+
+### Incremental Restore (Schema + Data)
+
+```bash
+# First phase: Restore schema only
+pg_restore \
+  -h localhost \
+  -U postgres \
+  -d mydb \
+  -s \
+  backup_20260218_154530.dump.gz
+
+# Second phase: Restore data with parallel jobs
+pg_restore \
+  -h localhost \
+  -U postgres \
+  -d mydb \
+  -a \
+  -j 4 \
+  backup_20260218_154530.dump.gz
+```
+
+### Restore Performance
+
+**Optimize restore speed:**
+
+```bash
+# Use parallel jobs with -j
+pg_restore \
+  -h localhost \
+  -U postgres \
+  -d mydb \
+  -j 4 \  # 4 parallel jobs
+  backup_20260218_154530.dump.gz
+
+# Disable indexes during restore, rebuild after
+pg_restore \
+  -h localhost \
+  -U postgres \
+  -d mydb \
+  --no-indexes \
+  backup_20260218_154530.dump.gz
+
+# Rebuild indexes
+REINDEX DATABASE mydb;
+```
+
+## Troubleshooting Restore
+
+### "Database mydb already exists"
+
+Create restore database with different name:
+
+```bash
+pg_restore \
+  -h localhost \
+  -U postgres \
+  -d mydb_restored \  # Different name
+  backup_20260218_154530.dump.gz
+```
+
+### "Permission denied" / "Connection refused"
+
+Check credentials and connectivity:
+
+```bash
+# Test connection
+psql -h localhost -p 5432 -U postgres -c "SELECT version();"
+
+# Verify credentials
+echo "PGPASSWORD=yourpassword psql -h localhost -U postgres -d template1 -c \"SELECT 1;\""
+```
+
+### "Backup file corrupted"
+
+Verify backup integrity:
+
+```bash
+# For .dump.gz files
+gunzip -c backup_*.dump.gz | file -
+
+# For .dir.tar.gz files
+tar -tzf backup_*.dir.tar.gz | wc -l
+
+# Check file size (shouldn't be 0)
+ls -lh backup_* | awk '{print $5, $9}'
+```
+
+### "Out of disk space"
+
+Make sure target database has room:
+
+```bash
+# Check disk space
+df -h /var/lib/postgresql/
+
+# Estimate restore size (roughly 3-5x backup size)
+du -sh backup_20260218_154530.dump.gz
+```
+
+### "Restore extremely slow"
+
+Optimize restore:
+
+```bash
+# Check current performance
+time pg_restore -h localhost -U postgres -d mydb backup_*.dump.gz
+
+# Try without indexes initially
+time pg_restore \
+  -h localhost \
+  -U postgres \
+  -d mydb \
+  --no-indexes \
+  backup_*.dump.gz
+
+# Check system load
+top  # During restore
+```
+
+## Prevention: Regular Restore Tests
+
+**Important:** Test your backups regularly!
+
+```bash
+#!/bin/bash
+# Monthly restore test
+
+BACKUP_FILE="/var/backups/postgresql/backup_latest.dump.gz"
+TEST_DB="mydb_restore_test_$(date +%Y%m%d)"
+
+# Create test database
+psql -U postgres -c "CREATE DATABASE $TEST_DB;"
+
+# Restore backup
+pg_restore -h localhost -U postgres -d $TEST_DB "$BACKUP_FILE"
+
+# Verify
+psql -h localhost -U postgres -d $TEST_DB -c "SELECT COUNT(*) as row_count FROM pg_stat_user_tables;" 
+
+# Cleanup
+psql -U postgres -c "DROP DATABASE $TEST_DB;"
+
+echo "Restore test completed successfully"
+```
+
+Run monthly:
+```bash
+chmod +x /opt/scripts/test_restore.sh
+# Add to crontab: 0 0 1 * * /opt/scripts/test_restore.sh
+```
+
+## Restore Checklist
+
+- ✅ Backup file located and verified
+- ✅ Target database prepared
+- ✅ Credentials confirmed
+- ✅ Disk space available
+- ✅ Network connectivity tested
+- ✅ Restore command ready
+- ✅ Post-restore verification plan
+- ✅ Communication plan if issues occur
+
+---
+
+<Callout title="Important" type="warning">
+Always test restore procedures in a non-production environment first.
+</Callout>

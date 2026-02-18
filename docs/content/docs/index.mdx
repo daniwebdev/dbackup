@@ -1,0 +1,118 @@
+---
+title: DBackup Documentation
+description: Robust, high-performance PostgreSQL and MySQL database backup utility written in Rust
+---
+
+# Welcome to DBackup
+
+**DBackup** is a robust, high-performance database backup utility written in **Rust**, designed for reliability and ease of use through YAML-based configuration.
+
+Whether you're backing up a small development database or managing multiple production systems, DBackup provides a flexible, efficient, and straightforward solution for your backup needs.
+
+## Why DBackup?
+
+- **Simple Configuration**: YAML-based setup - no complex scripts to write
+- **High Performance**: Parallel backup mode for large databases
+- **Multi-Engine Support**: PostgreSQL and MySQL support
+- **Flexible Storage**: Backup to local storage or S3-compatible cloud services
+- **Automated Scheduling**: Built-in cron support for hands-off operations
+- **Retention Policies**: Automatic cleanup of old backups to manage storage costs
+- **Systemd Integration**: Run as a service with automatic resource management
+
+## Choose Your Path
+
+<Cards>
+  <Card 
+    title="Quick Start" 
+    description="Get up and running in minutes"
+    href="/docs/getting-started"
+  />
+  <Card 
+    title="Installation" 
+    description="Install DBackup on your system"
+    href="/docs/installation"
+  />
+  <Card 
+    title="Configuration" 
+    description="Learn how to configure backups"
+    href="/docs/configuration"
+  />
+  <Card 
+    title="Storage Options" 
+    description="Local or cloud storage setup"
+    href="/docs/storage"
+  />
+</Cards>
+
+## Key Features at a Glance
+
+### 🚀 Performance
+- **Basic Mode**: Single-threaded with maximum compression for smaller databases
+- **Parallel Mode**: Multi-threaded backups for faster processing of large databases
+- Streaming I/O and concurrent job limits for memory efficiency
+
+### 💾 Database Support
+- PostgreSQL (via `pg_dump`)
+- MySQL and MariaDB (planned)
+
+### ☁️ Storage Flexibility
+- **Local Filesystem**: Direct backup to disk
+- **Amazon S3**: Enterprise cloud storage
+- **S3-Compatible Services**: MinIO, DigitalOcean Spaces, and more
+
+### ⏰ Automation
+- Cron-based scheduling for automated backups
+- Concurrent job execution with configurable limits
+- Systemd service integration
+
+### 🧹 Retention Management
+- Automatic cleanup of old backups
+- Simple duration-based retention policies (e.g., `7d`, `30d`, `1y`)
+
+## Quick Example
+
+Here's a minimal configuration to get started:
+
+```yaml
+settings:
+  binary:
+    pg_dump: /usr/bin/pg_dump
+  
+  storages:
+    local_backup:
+      driver: local
+      path: "/var/backups/postgresql"
+      filename_prefix: "backup_"
+
+backups:
+  - name: "My Database"
+    driver: postgresql
+    connection:
+      host: localhost
+      port: 5432
+      username: postgres
+      password: your_password
+      database: my_database
+    storage:
+      ref: local_backup
+```
+
+Run it:
+```bash
+dbackup backup -c backup.yml
+```
+
+That's it! Your database is backed up.
+
+## Next Steps
+
+- **New to DBackup?** → [Getting Started](/docs/getting-started)
+- **Ready to install?** → [Installation Guide](/docs/installation)
+- **Want to configure?** → [Configuration Guide](/docs/configuration)
+- **Looking for advanced features?** → [Retention Policies](/docs/retention) or [Systemd Setup](/docs/systemd-service)
+
+---
+
+<Callout title="Need Help?" type="tip">
+Check out our [Troubleshooting Guide](/docs/troubleshooting) or [FAQ](/docs/faq) if you run into any issues.
+</Callout>

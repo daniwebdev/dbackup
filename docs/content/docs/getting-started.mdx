@@ -1,0 +1,202 @@
+---
+title: Getting Started
+description: Get up and running with DBackup in minutes
+---
+
+# Getting Started with DBackup
+
+This guide will help you set up your first backup in just a few minutes.
+
+## Prerequisites
+
+Before you start, make sure you have:
+
+1. **Rust** 1.70 or higher (for building from source)
+2. **Database Client Tools** - Must be installed on your system
+
+<Callout title="Database Client Tools Required" type="warning">
+You must have the appropriate database client tools installed:
+- **PostgreSQL**: `pg_dump` command
+- **MySQL**: `mysqldump` command
+
+These tools are **required** for DBackup to function. Ensure they're installed and accessible in your system PATH.
+</Callout>
+
+## Step 1: Install DBackup
+
+### Option A: Build from Source
+
+```bash
+git clone <repository-url>
+cd db-backup-tools
+cargo build --release
+./target/release/dbackup --version
+```
+
+### Option B: Install with Cargo
+
+```bash
+cargo install --path .
+dbackup --version
+```
+
+## Step 2: Generate Configuration
+
+Create a sample configuration file:
+
+```bash
+dbackup generate -o backup.yml
+cat backup.yml
+```
+
+This creates a template configuration that you'll customize next.
+
+## Step 3: Configure Your First Backup
+
+Edit the `backup.yml` file with your database details:
+
+```yaml
+settings:
+  binary:
+    pg_dump: /usr/bin/pg_dump
+
+  storages:
+    local_backup:
+      driver: local
+      path: "/var/backups/postgresql"
+      filename_prefix: "backup_"
+
+backups:
+  - name: "Production Database"
+    driver: postgresql
+    connection:
+      host: localhost
+      port: 5432
+      username: postgres
+      password: your_password_here
+      database: production_db
+    mode: basic
+    storage:
+      ref: local_backup
+```
+
+**Configuration breakdown:**
+- `connection`: Database connection details
+- `mode`: `basic` (simple, smaller files) or `parallel` (faster, for large databases)
+- `storage`: Where to save backups
+
+## Step 4: Create Backup Directory
+
+```bash
+mkdir -p /var/backups/postgresql
+chmod 755 /var/backups/postgresql
+```
+
+## Step 5: Test Your Configuration
+
+Validate the configuration before running:
+
+```bash
+dbackup validate -c backup.yml
+```
+
+You should see:
+```
+✓ Configuration is valid
+```
+
+## Step 6: Run Your First Backup
+
+```bash
+dbackup backup -c backup.yml -n "Production Database"
+```
+
+This runs a one-time backup. You'll see output like:
+
+```
+[2026-02-18 15:45:30] Starting backup: Production Database
+[2026-02-18 15:45:45] Backup completed successfully
+[2026-02-18 15:45:45] Backup file: /var/backups/postgresql/backup_20260218_154530.dump.gz
+```
+
+## Step 7: Verify Your Backup
+
+Check that the backup file was created:
+
+```bash
+ls -lh /var/backups/postgresql/
+```
+
+You should see your backup file (e.g., `backup_20260218_154530.dump.gz`).
+
+## Next Steps
+
+Congratulations! You've created your first backup. Here's what you can do next:
+
+<Cards>
+  <Card 
+    title="Set Up Scheduled Backups" 
+    description="Learn how to automate backups with cron"
+    href="/docs/scheduling"
+  />
+  <Card 
+    title="Use Cloud Storage" 
+    description="Backup to Amazon S3 or MinIO"
+    href="/docs/storage"
+  />
+  <Card 
+    title="Run as a Service" 
+    description="Set up Systemd for automatic backups"
+    href="/docs/systemd-service"
+  />
+  <Card 
+    title="Configuration Reference" 
+    description="Explore all available options"
+    href="/docs/configuration"
+  />
+</Cards>
+
+## Common Issues & Quick Fixes
+
+### "pg_dump: command not found"
+
+**Solution:** Install PostgreSQL client tools (see Prerequisites section above)
+
+```bash
+# macOS
+brew install postgresql
+
+# Ubuntu/Debian
+sudo apt-get install postgresql-client
+```
+
+### "Connection refused"
+
+**Problem:** DBackup can't connect to your database
+
+**Solution:** Check your database is running and connection details are correct:
+```bash
+telnet localhost 5432  # For PostgreSQL
+```
+
+### "Permission denied" on backup directory
+
+**Solution:** Create the directory with proper permissions:
+```bash
+mkdir -p /var/backups/postgresql
+sudo chown $USER:$USER /var/backups/postgresql
+chmod 755 /var/backups/postgresql
+```
+
+## What's Next?
+
+- Learn about [Backup Modes](/docs/backup-modes) to optimize for your database size
+- Set up [Scheduled Backups](/docs/scheduling) for automation
+- Explore [Storage Options](/docs/storage) for cloud backups
+- See [Retention Policies](/docs/retention) to auto-clean old backups
+
+---
+
+<Callout title="Tip" type="info">
+Once you're comfortable with one-time backups, move to scheduled backups for hands-off automation!
+</Callout>

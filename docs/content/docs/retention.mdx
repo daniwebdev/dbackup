@@ -1,0 +1,364 @@
+---
+title: Retention Policies
+description: Automatically clean up old backups
+---
+
+# Retention Policies
+
+Automatically delete old backup files to manage storage costs and maintain disk space. Retention policies are simple duration-based rules.
+
+## Basic Concept
+
+Define how long to keep backups, and DBackup automatically deletes older ones:
+
+```yaml
+backups:
+  - name: "My Database"
+    driver: postgresql
+    retention: "30d"  # Keep for 30 days
+    connection: {...}
+    storage: {...}
+```
+
+When a backup job completes, DBackup checks for files older than the retention period and deletes them.
+
+## Duration Format
+
+Retention uses human-readable duration strings:
+
+| Format | Examples | Meaning |
+|--------|----------|---------|
+| **Seconds** | `30s`, `60s` | 30 seconds, 1 minute |
+| **Minutes** | `5m`, `30min` | 5 minutes, 30 minutes |
+| **Hours** | `1h`, `2hour`, `24hours` | 1 hour, 2 hours, 24 hours |
+| **Days** | `1d`, `7d`, `30day` | 1-30 days |
+| **Weeks** | `1w`, `2week`, `4weeks` | 1-4 weeks |
+| **Months** | `1mon`, `3month`, `12months` | 1-12 months (~30 days each) |
+| **Years** | `1y`, `2year` | 1-2 years |
+
+## Common Retention Strategies
+
+### Development Environment
+
+Keep backups very short-term:
+
+```yaml
+backups:
+  - name: "Dev Database"
+    driver: postgresql
+    connection: {...}
+    schedule:
+      cron: "0 * * * *"  # Hourly
+    retention: "3d"  # Keep 3 days
+    storage:
+      ref: local_backup
+```
+
+**Storage needed:** 3 days × 24 hourly backups × backup_size
+
+### Production Database
+
+Keep moderate retention for recovery:
+
+```yaml
+backups:
+  - name: "Production Database"
+    driver: postgresql
+    connection: {...}
+    schedule:
+      cron: "0 2 * * *"  # Daily
+    retention: "30d"  # Keep 30 days
+    storage:
+      ref: s3_backups
+```
+
+**Storage needed:** 30 days × 1 backup/day × backup_size
+
+### Archive/Compliance
+
+Keep long-term for compliance:
+
+```yaml
+backups:
+  - name: "Archive Database"
+    driver: postgresql
+    connection: {...}
+    schedule:
+      cron: "0 0 1 * *"  # Monthly
+    retention: "2y"  # Keep 2 years
+    storage:
+      ref: s3_long_term
+```
+
+## Complete Configuration Example
+
+```yaml
+settings:
+  binary:
+    pg_dump: /usr/bin/pg_dump
+  
+  storages:
+    local_backups:
+      driver: local
+      path: /var/backups/postgresql
+      filename_prefix: backup_
+    
+    s3_backups:
+      driver: s3
+      bucket: company-backups
+      region: us-east-1
+      prefix: postgresql/
+
+backups:
+  - name: "Hourly (Short Retention)"
+    driver: postgresql
+    connection:
+      host: localhost
+      port: 5432
+      username: postgres
+      password: ${DB_PASSWORD}
+      database: prod_db
+    mode: basic
+    schedule:
+      cron: "0 * * * *"  # Every hour
+    storage:
+      ref: local_backups
+      prefix: hourly/
+    retention: "7d"  # Keep 1 week (168 backups)
+
+  - name: "Daily (Medium Retention)"
+    driver: postgresql
+    connection:
+      host: localhost
+      port: 5432
+      username: postgres
+      password: ${DB_PASSWORD}
+      database: prod_db
+    mode: parallel
+    parallel_jobs: 4
+    schedule:
+      cron: "0 2 * * *"  # Daily at 2 AM
+    storage:
+      ref: s3_backups
+      prefix: daily/
+    retention: "90d"  # Keep 3 months (90 backups)
+
+  - name: "Weekly (Long Retention)"
+    driver: postgresql
+    connection:
+      host: localhost
+      port: 5432
+      username: postgres
+      password: ${DB_PASSWORD}
+      database: prod_db
+    mode: parallel
+    parallel_jobs: 4
+    schedule:
+      cron: "0 0 * * 0"  # Weekly Sunday
+    storage:
+      ref: s3_backups
+      prefix: weekly/
+    retention: "1y"  # Keep 1 year (52 backups)
+```
+
+## Storage Cost Calculation
+
+Estimate your storage costs based on retention:
+
+### Local Storage Formula
+
+```
+Storage needed = Backup Size × (Number of backups retained)
+```
+
+**Example: Daily backups with 30-day retention**
+- Backup size: 1 GB
+- Frequency: 1 per day
+- Retention: 30 days
+- **Storage needed:** 1 GB × 30 = 30 GB
+
+### S3 Storage Formula
+
+```
+Monthly cost = (Backup Size × Retention Days / 30) × $0.023/GB
+
+Example: 10 GB backup, 90-day retention
+= (10 × 90 / 30) × $0.023
+= 30 GB × $0.023
+= $0.69/month
+```
+
+## Retention Decision Tree
+
+```
+How often do you need to recover from backups?
+├─ Very frequently (multiple times/day)
+│  └─ Use shorter retention (7d - 14d)
+├─ Frequently (daily)
+│  └─ Use moderate retention (14d - 30d)
+├─ Occasionally (weekly)
+│  └─ Use longer retention (30d - 90d)
+└─ Rarely (compliance only)
+   └─ Use very long retention (1y+)
+```
+
+## Practical Examples
+
+### Small Application (100 MB daily backup)
+
+```yaml
+- name: "Small App"
+  retention: "14d"  # 2 weeks
+  # Storage: 1.4 GB
+```
+
+### Medium SaaS (5 GB daily backup)
+
+```yaml
+- name: "SaaS App"
+  retention: "30d"  # 1 month
+  # Storage: 150 GB
+  # S3 Cost: ~$3.50/month
+```
+
+### Large Enterprise (100 GB daily backup)
+
+```yaml
+- name: "Enterprise DB"
+  retention: "90d"  # 3 months
+  # Storage: 9 TB
+  # S3 Cost: ~$207/month
+  # Consider: tiered retention or archival
+```
+
+### Tiered Retention Strategy
+
+Keep different retention periods for different backup frequencies:
+
+```yaml
+backups:
+  # Keep daily backups short-term
+  - name: "Daily Production"
+    schedule:
+      cron: "0 2 * * *"
+    retention: "14d"  # 2 weeks
+
+  # Keep weekly backups longer
+  - name: "Weekly Archive"
+    schedule:
+      cron: "0 0 * * 0"  # Sunday
+    retention: "1y"  # 1 year
+
+  # Keep monthly for compliance
+  - name: "Monthly Compliance"
+    schedule:
+      cron: "0 0 1 * *"  # 1st of month
+    retention: "3y"  # 3 years
+```
+
+## Monitoring Retention
+
+### Enable Verbose Logging
+
+```bash
+RUST_LOG=debug dbackup run -c backup.yml
+```
+
+You'll see messages like:
+```
+[2026-02-18 02:15:30] Production Database: Starting backup
+[2026-02-18 02:25:30] Production Database: Backup completed
+[2026-02-18 02:25:35] Production Database: Cleaning old backups
+[2026-02-18 02:25:36] Production Database: Deleted old backup: backup_20260119_020000.dump.gz
+```
+
+### Check Retention Policy
+
+Verify your retention configuration:
+
+```bash
+dbackup validate -c backup.yml
+```
+
+### Monitor Disk Space
+
+```bash
+# Check backup directory size
+du -sh /var/backups/postgresql/
+
+# Check free space
+df -h /var/backups/postgresql/
+
+# Monitor with watch (updates every 10s)
+watch -n 10 "du -sh /var/backups/postgresql/"
+```
+
+## Best Practices
+
+✅ **Do's:**
+- Set retention based on recovery needs, not just storage availability
+- Monitor actual backup growth over time
+- Test restoration from older backups
+- Use tiered retention for different backup frequencies
+- Adjust retention if storage usage grows unexpectedly
+
+❌ **Don'ts:**
+- Don't set retention too short (you won't be able to recover)
+- Don't rely solely on retention (monitor it actively)
+- Don't delete retention period's worth of backups manually
+- Don't ignore disk space warnings
+- Don't set retention longer than necessary
+
+## Troubleshooting Retention
+
+### Backups Not Being Deleted
+
+1. **Verify retention is set:**
+   ```yaml
+   backups:
+     - name: My Database
+       retention: "30d"  # Make sure this exists
+   ```
+
+2. **Check logs:**
+   ```bash
+   journalctl -u dbackup -f
+   ```
+
+3. **Verify file age:**
+   ```bash
+   ls -l --full-time /var/backups/postgresql/
+   ```
+
+### Deleting Too Many Backups
+
+1. **Check retention duration** - might be too short
+2. **Check backup frequency** - hourly backups expire quickly
+3. **Monitor first run** - test with verbose logging:
+   ```bash
+   RUST_LOG=debug dbackup backup -c backup.yml
+   ```
+
+### Running Out of Disk Space
+
+1. **Check actual backup size:**
+   ```bash
+   du -sh /var/backups/postgresql/
+   ```
+
+2. **Calculate required space:**
+   ```
+   Required = Backup Size × (Retention Days / Frequency Days)
+   ```
+
+3. **Options:**
+   - Reduce retention period
+   - Use compression (automatic in DBackup)
+   - Move to cloud storage (S3)
+   - Increase disk space
+
+---
+
+<Callout title="Pro Tip" type="tip">
+For production systems, test retention policies in a non-critical backup first to understand the impact.
+</Callout>

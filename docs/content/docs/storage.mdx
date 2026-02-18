@@ -1,0 +1,405 @@
+---
+title: Storage Options
+description: Configure backups for local and cloud storage
+---
+
+# Storage Options
+
+DBackup supports flexible storage options for your backups: local filesystem and S3-compatible cloud storage. Choose the option that best fits your needs.
+
+## Storage Types
+
+| Storage | Best For | Cost | Setup |
+|---------|----------|------|-------|
+| **Local** | Development, small deployments | Hardware cost | Quick |
+| **S3** | Production, compliance, disaster recovery | Pay-as-you-go | Moderate |
+| **S3-Compatible** | On-premises cloud, cost optimization | Depends | Moderate |
+
+## Local Storage
+
+### Configuration
+
+#### Centralized (Recommended)
+
+```yaml
+settings:
+  storages:
+    local_backup:
+      driver: local
+      path: /var/backups/postgresql
+      filename_prefix: backup_
+```
+
+#### Inline (Direct)
+
+```yaml
+backups:
+  - name: My Database
+    storage:
+      driver: local
+      path: /var/backups/postgresql
+      filename_prefix: backup_
+```
+
+### Setup
+
+1. **Create backup directory:**
+   ```bash
+   mkdir -p /var/backups/postgresql
+   chmod 755 /var/backups/postgresql
+   ```
+
+2. **Set ownership (systemd service):**
+   ```bash
+   sudo chown postgres:postgres /var/backups/postgresql
+   ```
+
+3. **Configure in YAML:**
+   ```yaml
+   storage:
+     ref: local_backup
+   ```
+
+### Directory Structure
+
+After backups, your directory looks like:
+
+```
+/var/backups/postgresql/
+├── backup_20260218_001230.dump.gz      # Day 1
+├── backup_20260218_020000.dump.gz      # Day 1
+├── backup_20260219_001230.dump.gz      # Day 2
+└── backup_20260220_001230.dump.gz      # Day 3
+```
+
+### Best Practices
+
+✅ **Do's:**
+- Use dedicated backup volume/partition
+- Monitor free disk space regularly
+- Set appropriate file permissions (600 for sensitive data)
+- Use retention policies to clean old backups
+
+❌ **Don'ts:**
+- Don't backup to the same disk as the database
+- Don't use insufficient disk space
+- Don't make backups world-readable
+- Don't backup to network drives (NFS has reliability issues)
+
+## Amazon S3 Storage
+
+### Prerequisites
+
+1. **AWS Account** with S3 access
+2. **AWS Credentials** configured
+3. **S3 Bucket** created
+
+### Step 1: Create S3 Bucket
+
+```bash
+# Create bucket
+aws s3api create-bucket \
+  --bucket my-database-backups \
+  --region us-east-1
+
+# Or from AWS Console
+# S3 → Create Bucket → name it, leave defaults
+```
+
+### Step 2: Configure AWS Credentials
+
+Choose one method:
+
+#### Method A: Environment Variables (Recommended for Containers)
+
+```bash
+export AWS_ACCESS_KEY_ID="AKIA..."
+export AWS_SECRET_ACCESS_KEY="wJal..."
+export AWS_DEFAULT_REGION="us-east-1"
+```
+
+#### Method B: AWS Credentials File (~/.aws/credentials)
+
+```ini
+[default]
+aws_access_key_id = AKIA...
+aws_secret_access_key = wJal...
+region = us-east-1
+```
+
+#### Method C: IAM Role (For EC2 Instances)
+
+Attach IAM role with S3 permissions to your EC2 instance:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:DeleteObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::my-database-backups",
+        "arn:aws:s3:::my-database-backups/*"
+      ]
+    }
+  ]
+}
+```
+
+### Step 3: Configure DBackup
+
+```yaml
+settings:
+  storages:
+    s3_backups:
+      driver: s3
+      bucket: my-database-backups
+      region: us-east-1
+      prefix: postgresql/daily/
+
+backups:
+  - name: Production Database
+    driver: postgresql
+    connection: {...}
+    storage:
+      ref: s3_backups
+```
+
+### S3 Configuration Options
+
+```yaml
+storage:
+  driver: s3
+  bucket: my-backups              # Required: bucket name
+  region: us-east-1               # Required: AWS region
+  prefix: postgresql/prod/        # Optional: path prefix (default: "backups/")
+  endpoint: ""                    # Optional: custom endpoint URL
+  access_key_id: ""               # Optional: AWS access key
+  secret_access_key: ""           # Optional: AWS secret key
+```
+
+### Complete Example
+
+```yaml
+settings:
+  storages:
+    production_s3:
+      driver: s3
+      bucket: company-backups
+      region: us-east-1
+      prefix: postgresql/production/
+
+    analytics_s3:
+      driver: s3
+      bucket: company-backups
+      region: us-east-1
+      prefix: postgresql/analytics/
+
+backups:
+  - name: Production Database
+    driver: postgresql
+    connection:
+      host: prod-db.example.com
+      port: 5432
+      username: postgres
+      password: ${DB_PASSWORD}
+      database: production_db
+    mode: parallel
+    parallel_jobs: 4
+    schedule:
+      cron: "0 2 * * *"
+    storage:
+      ref: production_s3
+    retention: "90d"
+
+  - name: Analytics Database
+    driver: postgresql
+    connection:
+      host: analytics-db.example.com
+      port: 5432
+      username: postgres
+      password: ${DB_PASSWORD}
+      database: analytics_db
+    mode: parallel
+    parallel_jobs: 4
+    schedule:
+      cron: "0 3 * * *"
+    storage:
+      ref: analytics_s3
+    retention: "1y"
+```
+
+### Cost Optimization
+
+**Estimate your costs:**
+
+```
+Storage cost: (Backup Size) × (Retention Days) / 30 × $0.023/GB/month
+Example: 10 GB backup × 30 days / 30 × $0.023 = $0.23/month
+```
+
+**Ways to reduce costs:**
+- Use retention policies to delete old backups
+- Enable S3 Intelligent-Tiering for automatic archival
+- Use S3 Standard-IA for older backups
+- Cross-region replication only when needed
+
+### Verify S3 Backups
+
+```bash
+# List backups in S3
+aws s3 ls s3://my-database-backups/postgresql/daily/
+
+# Download a backup
+aws s3 cp s3://my-database-backups/postgresql/daily/backup_*.dump.gz ./
+
+# Check backup size
+aws s3api head-object \
+  --bucket my-database-backups \
+  --key postgresql/daily/backup_20260218_001230.dump.gz
+```
+
+## S3-Compatible Services
+
+DBackup also works with S3-compatible services: MinIO, DigitalOcean Spaces, Wasabi, etc.
+
+### MinIO (On-Premises)
+
+```yaml
+settings:
+  storages:
+    minio_backup:
+      driver: s3
+      bucket: backups
+      region: minio
+      endpoint: http://minio.example.com:9000
+      access_key_id: minioadmin
+      secret_access_key: minioadmin
+      prefix: postgresql/
+```
+
+### DigitalOcean Spaces
+
+```yaml
+settings:
+  storages:
+    do_spaces:
+      driver: s3
+      bucket: my-space
+      region: nyc3
+      endpoint: https://nyc3.digitaloceanspaces.com
+      access_key_id: ${DO_KEY}
+      secret_access_key: ${DO_SECRET}
+      prefix: backups/
+```
+
+### Wasabi
+
+```yaml
+settings:
+  storages:
+    wasabi:
+      driver: s3
+      bucket: my-backups
+      region: us-west-1
+      endpoint: https://s3.wasabisys.com
+      access_key_id: ${WASABI_KEY}
+      secret_access_key: ${WASABI_SECRET}
+```
+
+## Hybrid Storage Strategy
+
+Combine local and S3 storage for resilience:
+
+```yaml
+settings:
+  storages:
+    local_backup:
+      driver: local
+      path: /var/backups/postgresql
+      filename_prefix: backup_
+    
+    s3_backup:
+      driver: s3
+      bucket: company-backups
+      region: us-east-1
+      prefix: postgresql/
+
+backups:
+  - name: Production Database
+    driver: postgresql
+    connection: {...}
+    # Run multiple backups targeting different storage
+    storage:
+      ref: local_backup
+
+  - name: Production Database (S3 Archive)
+    driver: postgresql
+    connection: {...}
+    schedule:
+      cron: "0 3 * * *"  # Different time
+    storage:
+      ref: s3_backup
+    retention: "1y"  # Keep longer in cloud
+```
+
+This approach:
+- ✅ Fast restore from local storage
+- ✅ Long-term archival in cloud
+- ✅ Disaster recovery capability
+- ✅ Compliance requirements met
+
+## Troubleshooting Storage
+
+### Local Storage Issues
+
+**"Permission denied"**
+```bash
+sudo chown postgres:postgres /var/backups/postgresql
+sudo chmod 755 /var/backups/postgresql
+```
+
+**"No space left on device"**
+```bash
+# Check disk space
+df -h /var/backups/postgresql
+
+# Check if retention is working
+dbackup validate -c backup.yml
+```
+
+### S3 Storage Issues
+
+**"Access Denied" or "Forbidden"**
+- Check IAM permissions
+- Verify bucket name and region
+- Confirm credentials are correct
+
+```bash
+# Test S3 access
+aws s3 ls s3://my-backups --region us-east-1
+```
+
+**"Connection timeout"**
+- Check network connectivity
+- Verify endpoint URL
+- For S3-compatible services, check if service is running
+
+**"Bucket not found"**
+```bash
+# List your buckets
+aws s3 ls
+
+# Create bucket if needed
+aws s3api create-bucket --bucket my-backups --region us-east-1
+```
+
+<Callout title="Security Note" type="warning">
+Never commit credentials to version control. Use environment variables or AWS credential files instead.
+</Callout>

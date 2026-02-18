@@ -1,0 +1,347 @@
+---
+title: Configuration
+description: Complete guide to DBackup configuration
+---
+
+# Configuration Guide
+
+DBackup uses simple YAML files for configuration. This guide covers all available options and best practices.
+
+## Configuration Structure
+
+```yaml
+settings:
+  binary:
+    # Optional: specify full paths to backup binaries
+    pg_dump: /usr/bin/pg_dump
+    mysqldump: /usr/bin/mysqldump
+  
+  storages:
+    # Define reusable storage configurations
+    local_backup:
+      driver: local
+      path: "/var/backups/postgresql"
+      filename_prefix: "backup_"
+
+backups:
+  # Define one or more backups
+  - name: "Production Database"
+    driver: postgresql
+    connection: {...}
+    storage: {...}
+```
+
+## Global Settings
+
+### Binary Paths
+
+Specify custom paths to backup binaries (optional). If not specified, DBackup uses the binary from system PATH.
+
+```yaml
+settings:
+  binary:
+    pg_dump: /usr/bin/pg_dump
+    mysqldump: /opt/mysql/bin/mysqldump
+```
+
+**Benefits:**
+- Override system PATH for specific binaries
+- Use custom PostgreSQL installations
+- Support non-standard installation paths
+
+### Storage Configuration
+
+Define reusable storage profiles under `settings.storages`. This is the **recommended approach**.
+
+```yaml
+settings:
+  storages:
+    production_local:
+      driver: local
+      path: "/var/backups/postgresql"
+      filename_prefix: "prod_"
+    
+    production_s3:
+      driver: s3
+      bucket: my-backups
+      region: us-east-1
+      prefix: postgresql/prod/
+    
+    development:
+      driver: local
+      path: "/tmp/backups"
+      filename_prefix: "dev_"
+```
+
+## Backup Configuration
+
+### Basic Backup Configuration
+
+```yaml
+backups:
+  - name: "My Database"           # Unique name for this backup
+    driver: postgresql             # or "mysql"
+    connection:                    # Database connection details
+      host: localhost
+      port: 5432
+      username: postgres
+      password: secret
+      database: mydb
+    mode: basic                    # or "parallel"
+    storage:
+      ref: local_backup            # Reference to storage from settings
+```
+
+### Connection Settings
+
+#### PostgreSQL Connection
+
+```yaml
+connection:
+  host: localhost              # Database hostname or IP
+  port: 5432                   # PostgreSQL port (default: 5432)
+  username: postgres           # Database user
+  password: your_password      # Database password
+  database: production_db      # Database name to backup
+```
+
+#### MySQL Connection
+
+```yaml
+connection:
+  host: localhost
+  port: 3306                   # MySQL port (default: 3306)
+  username: root
+  password: your_password
+  database: production_db
+```
+
+**Security Note:** Consider using environment variables for passwords in production:
+
+```yaml
+connection:
+  host: localhost
+  port: 5432
+  username: postgres
+  password: ${DB_PASSWORD}  # Environment variable
+  database: mydb
+```
+
+## Backup Modes
+
+### Basic Mode (Default)
+
+Single-threaded backup with maximum compression.
+
+```yaml
+mode: basic
+```
+
+**Best for:**
+- Small to medium databases (< 10 GB)
+- Limited storage space
+- Lower CPU systems
+- Simple restore process
+
+**Output:**
+```
+{filename_prefix}{timestamp}.dump.gz
+Example: backup_20260218_154530.dump.gz
+```
+
+### Parallel Mode
+
+Multi-threaded backup using directory format.
+
+```yaml
+mode: parallel
+parallel_jobs: 4
+```
+
+**Best for:**
+- Large databases (> 10 GB)
+- Multi-core systems
+- Fast backup is critical
+- High-performance environments
+
+**Output:**
+```
+{filename_prefix}{timestamp}.dir.tar.gz
+Example: backup_20260218_154530.dir.tar.gz
+```
+
+**Configuration:**
+- `parallel_jobs`: Number of parallel threads (default: 2)
+  - Recommended: Number of CPU cores or less
+  - For 4-core CPU: use 2-4 jobs
+  - For 16-core CPU: use 8-12 jobs
+
+## Storage Configuration
+
+### Local Storage
+
+```yaml
+storage:
+  ref: local_backup  # Reference to storage definition
+```
+
+Or inline:
+
+```yaml
+storage:
+  driver: local
+  path: "/var/backups/postgresql"
+  filename_prefix: "backup_"
+```
+
+**Options:**
+- `path`: Directory where backups are stored
+- `filename_prefix`: Prefix for backup filenames
+
+### S3 Storage
+
+```yaml
+storage:
+  ref: s3_production
+```
+
+Or inline:
+
+```yaml
+storage:
+  driver: s3
+  bucket: my-backups
+  region: us-east-1
+  prefix: postgresql/prod/
+```
+
+**Options:**
+- `bucket`: S3 bucket name
+- `region`: AWS region (e.g., "us-east-1", "eu-west-1")
+- `prefix`: Path prefix in S3 (default: "backups/")
+- `endpoint`: Custom endpoint for S3-compatible services (optional)
+- `access_key_id`: AWS access key (optional, uses AWS SDK env vars if omitted)
+- `secret_access_key`: AWS secret key (optional, uses AWS SDK env vars if omitted)
+
+## Complete Example Configuration
+
+```yaml
+settings:
+  binary:
+    pg_dump: /usr/bin/pg_dump
+  
+  storages:
+    local_backups:
+      driver: local
+      path: "/var/backups/postgresql"
+      filename_prefix: "backup_"
+    
+    s3_backups:
+      driver: s3
+      bucket: company-backups
+      region: us-east-1
+      prefix: postgresql/
+
+backups:
+  - name: "Production Database"
+    driver: postgresql
+    connection:
+      host: prod-db.example.com
+      port: 5432
+      username: postgres
+      password: ${DB_PASSWORD}
+      database: production_db
+    mode: parallel
+    parallel_jobs: 4
+    schedule:
+      cron: "0 2 * * *"  # Daily at 2 AM
+    storage:
+      ref: s3_backups
+    retention: "30d"  # Keep for 30 days
+
+  - name: "Development Database"
+    driver: postgresql
+    connection:
+      host: localhost
+      port: 5432
+      username: postgres
+      password: ${DEV_DB_PASSWORD}
+      database: dev_db
+    mode: basic
+    storage:
+      ref: local_backups
+      prefix: "dev/"
+```
+
+## Advanced Options
+
+### Per-Backup Binary Override
+
+Override the binary path for a specific backup:
+
+```yaml
+backups:
+  - name: "Production Database"
+    driver: postgresql
+    binary_path: /custom/path/to/pg_dump
+    connection: {...}
+    storage: {...}
+```
+
+### Schedule Configuration
+
+Define cron expressions for automated backups:
+
+```yaml
+backups:
+  - name: "Daily Backup"
+    driver: postgresql
+    schedule:
+      cron: "0 2 * * *"  # Daily at 2 AM
+    connection: {...}
+    storage: {...}
+```
+
+[Learn more about Scheduling](/docs/scheduling)
+
+### Retention Policy
+
+Automatically delete old backups:
+
+```yaml
+backups:
+  - name: "Database"
+    driver: postgresql
+    retention: "30d"  # Keep for 30 days
+    connection: {...}
+    storage: {...}
+```
+
+[Learn more about Retention](/docs/retention)
+
+## Best Practices
+
+✅ **Do's:**
+- Use centralized `settings.storages` for reusability
+- Use environment variables for sensitive data
+- Start with `mode: basic` until you understand the difference
+- Test configuration with `dbackup validate` before running
+- Use descriptive names for backups
+
+❌ **Don'ts:**
+- Don't commit passwords to version control
+- Don't use `mode: parallel` on systems with limited CPU
+- Don't use `parallel_jobs` higher than your CPU cores
+- Don't store backup.yml in publicly accessible locations
+
+## Validation
+
+Always validate your configuration before running:
+
+```bash
+dbackup validate -c backup.yml
+```
+
+<Callout title="Need Help?" type="info">
+See [Troubleshooting](/docs/troubleshooting) for common configuration issues.
+</Callout>

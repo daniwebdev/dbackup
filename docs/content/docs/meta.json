@@ -1,0 +1,17 @@
+{
+  "title": "Guide",
+  "root": true,
+  "pages": [
+    "getting-started",
+    "installation",
+    "configuration",
+    "backup-modes",
+    "storage",
+    "scheduling",
+    "retention",
+    "restore",
+    "systemd-service",
+    "cli-reference",
+    "troubleshooting"
+  ]
+}

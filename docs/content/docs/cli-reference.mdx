@@ -1,0 +1,477 @@
+---
+title: CLI Reference
+description: Complete DBackup command-line interface documentation
+---
+
+# CLI Reference
+
+Complete guide to all DBackup command-line commands and options.
+
+## General Syntax
+
+```
+dbackup <COMMAND> [OPTIONS]
+```
+
+## Commands
+
+### `generate`
+
+Generate a sample configuration file.
+
+**Usage:**
+```bash
+dbackup generate [OPTIONS]
+```
+
+**Options:**
+- `-o, --output <FILE>` - Output file path (default: `backup.yml`)
+
+**Examples:**
+```bash
+# Generate to default backup.yml
+dbackup generate
+
+# Generate to custom path
+dbackup generate -o my-backup-config.yml
+
+# Pipe to stdout
+dbackup generate | tee backup.yml
+```
+
+---
+
+### `validate`
+
+Validate a configuration file without running backups.
+
+**Usage:**
+```bash
+dbackup validate [OPTIONS]
+```
+
+**Options:**
+- `-c, --config <FILE>` - Configuration file path (required)
+
+**Examples:**
+```bash
+# Check if config is valid
+dbackup validate -c backup.yml
+
+# Output:
+# ✓ Configuration is valid
+
+# Or if invalid:
+# ✗ Configuration error: Invalid connection settings
+```
+
+**Use it before:**
+- Running backups for the first time
+- Making significant config changes
+- Deploying to production
+
+---
+
+### `backup`
+
+Run one-time backups immediately.
+
+**Usage:**
+```bash
+dbackup backup [OPTIONS]
+```
+
+**Options:**
+- `-c, --config <FILE>` - Configuration file path (required)
+- `-n, --name <NAME>` - Run specific backup by name (optional)
+- `--concurrency <NUM>` - Number of concurrent jobs (default: 2)
+
+**Examples:**
+```bash
+# Run all backups
+dbackup backup -c backup.yml
+
+# Run specific backup
+dbackup backup -c backup.yml -n "Production Database"
+
+# Run with custom concurrency
+dbackup backup -c backup.yml --concurrency 4
+
+# Enable verbose logging
+RUST_LOG=debug dbackup backup -c backup.yml
+```
+
+**Output:**
+```
+[2026-02-18 15:45:30] Starting backup: Production Database
+[2026-02-18 15:45:45] Backup completed successfully
+[2026-02-18 15:45:45] Backup file: /var/backups/postgresql/backup_20260218_154530.dump.gz
+```
+
+---
+
+### `run`
+
+Start daemon mode to listen for scheduled backups.
+
+**Usage:**
+```bash
+dbackup run [OPTIONS]
+```
+
+**Options:**
+- `-c, --config <FILE>` - Configuration file path (required)
+- `--concurrency <NUM>` - Maximum concurrent backups (default: 2)
+
+**Examples:**
+```bash
+# Start daemon with default concurrency (2 backups max)
+dbackup run -c backup.yml
+
+# Start with higher concurrency for more backups
+dbackup run -c backup.yml --concurrency 4
+
+# Enable debug logging
+RUST_LOG=debug dbackup run -c backup.yml
+
+# Run in background
+nohup dbackup run -c backup.yml > dbackup.log 2>&1 &
+```
+
+**Output:**
+```
+[2026-02-18 15:00:00] DBackup daemon started
+[2026-02-18 15:00:00] Listening for scheduled backups
+[2026-02-18 15:00:00] Loaded 3 backup jobs
+[2026-02-18 02:00:00] Starting scheduled backup: Daily Production
+[2026-02-18 02:15:30] Backup completed successfully
+```
+
+**To stop the daemon:**
+- Press `Ctrl+C`
+- Or use systemd: `systemctl stop dbackup`
+
+---
+
+### `--help`
+
+Display help information.
+
+**Usage:**
+```bash
+dbackup --help
+dbackup <COMMAND> --help
+```
+
+**Examples:**
+```bash
+# General help
+dbackup --help
+
+# Help for specific command
+dbackup backup --help
+dbackup run --help
+dbackup validate --help
+```
+
+---
+
+### `--version`
+
+Display version information.
+
+**Usage:**
+```bash
+dbackup --version
+```
+
+**Example:**
+```
+dbackup 1.0.0
+```
+
+---
+
+## Environment Variables
+
+### Logging
+
+Control logging verbosity with `RUST_LOG`:
+
+```bash
+# Disable logging
+dbackup backup -c backup.yml
+
+# Error level (errors only)
+RUST_LOG=error dbackup backup -c backup.yml
+
+# Warn level (warnings and errors)
+RUST_LOG=warn dbackup backup -c backup.yml
+
+# Info level (normal operation info)
+RUST_LOG=info dbackup backup -c backup.yml
+
+# Debug level (detailed debug information)
+RUST_LOG=debug dbackup backup -c backup.yml
+
+# Trace level (all details, very verbose)
+RUST_LOG=trace dbackup backup -c backup.yml
+```
+
+### AWS Credentials
+
+For S3 backup storage:
+
+```bash
+export AWS_ACCESS_KEY_ID="AKIA..."
+export AWS_SECRET_ACCESS_KEY="wJal..."
+export AWS_DEFAULT_REGION="us-east-1"
+
+dbackup backup -c backup.yml
+```
+
+### Database Credentials
+
+```bash
+export DB_PASSWORD="your_password"
+export ANALYTICS_PASSWORD="analytics_password"
+
+dbackup backup -c backup.yml
+```
+
+Then in config:
+
+```yaml
+connection:
+  password: ${DB_PASSWORD}
+```
+
+## Common Command Patterns
+
+### One-Time Backup
+
+```bash
+# Backup everything
+dbackup backup -c backup.yml
+
+# Backup specific database
+dbackup backup -c backup.yml -n "Production Database"
+```
+
+### Automated Scheduled Backups
+
+#### Option 1: Systemd Service (Recommended)
+
+```bash
+# Install service
+sudo cp dbackup.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable dbackup.service
+sudo systemctl start dbackup.service
+
+# Check status
+sudo systemctl status dbackup.service
+
+# View logs
+sudo journalctl -u dbackup -f
+```
+
+#### Option 2: Manual Daemon
+
+```bash
+# Start in background
+nohup dbackup run -c backup.yml > /var/log/dbackup.log 2>&1 &
+
+# Or with tmux
+tmux new-session -d -s backup 'dbackup run -c backup.yml'
+
+# Reattach to session
+tmux attach -t backup
+```
+
+### Development Environment
+
+```bash
+# Quick validation
+dbackup validate -c backup.yml
+
+# Manual backup
+dbackup backup -c backup.yml -n "Dev Database"
+
+# Check results
+ls -lh /var/backups/postgresql/
+```
+
+### Production Setup
+
+```bash
+# Validate config
+dbackup validate -c /etc/dbackup/backup.yml
+
+# Test single backup
+dbackup backup -c /etc/dbackup/backup.yml -n "Production Database"
+
+# Enable service
+sudo systemctl enable dbackup.service
+sudo systemctl start dbackup.service
+
+# Monitor
+sudo journalctl -u dbackup -f --since "1 hour ago"
+```
+
+## Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success |
+| `1` | General error |
+| `2` | Configuration error |
+| `5` | Connection failed |
+
+**Usage in scripts:**
+
+```bash
+#!/bin/bash
+dbackup backup -c backup.yml
+if [ $? -eq 0 ]; then
+  echo "Backup successful"
+else
+  echo "Backup failed with code $?"
+  exit 1
+fi
+```
+
+## Performance Tuning Flags
+
+### Concurrency
+
+Control how many backups run simultaneously:
+
+```bash
+# Run 1 backup at a time (sequential)
+dbackup run -c backup.yml --concurrency 1
+
+# Run 4 backups concurrently
+dbackup run -c backup.yml --concurrency 4
+
+# Run 8 backups concurrently
+dbackup run -c backup.yml --concurrency 8
+```
+
+**Recommendation:**
+- Start with `--concurrency 2`
+- Monitor system load
+- Increase if needed
+
+### Parallel Jobs in Config
+
+For individual backups, control parallel jobs:
+
+```yaml
+backups:
+  - name: Large Database
+    mode: parallel
+    parallel_jobs: 4  # Use 4 threads for this backup
+```
+
+## Scripting Examples
+
+### Backup and Notify
+
+```bash
+#!/bin/bash
+
+CONFIG="/etc/dbackup/backup.yml"
+LOG="/var/log/dbackup-backup.log"
+
+# Run backup
+dbackup backup -c "$CONFIG" > "$LOG" 2>&1
+
+# Check result
+if [ $? -eq 0 ]; then
+  echo "✓ Backup successful" | mail -s "Backup Success" admin@example.com
+else
+  echo "✗ Backup failed" | mail -s "Backup Failed" admin@example.com
+  exit 1
+fi
+```
+
+### Daily Backup Runner
+
+```bash
+#!/bin/bash
+
+CONFIG="/etc/dbackup/backup.yml"
+LOG="/var/log/dbackup-$(date +%Y%m%d).log"
+
+dbackup backup -c "$CONFIG" 2>&1 | tee "$LOG"
+
+# Archive old logs
+find /var/log -name "dbackup-*.log" -mtime +30 -delete
+```
+
+### Monitor and Alert
+
+```bash
+#!/bin/bash
+
+CONFIG="/etc/dbackup/backup.yml"
+BACKUP_DIR="/var/backups/postgresql"
+
+# Check if backup exists from today
+if [ -z "$(find "$BACKUP_DIR" -mtime -1 -name "*dump.gz" 2>/dev/null)" ]; then
+  echo "No backup from today found!"
+  exit 1
+fi
+
+# Check backup size
+SIZE=$(du -sh "$BACKUP_DIR" | awk '{print $1}')
+echo "Latest backup: $SIZE"
+```
+
+## Troubleshooting Commands
+
+### Verify Installation
+
+```bash
+# Check version
+dbackup --version
+
+# Check command availability
+which dbackup
+
+# Check PostgreSQL client
+pg_dump --version
+```
+
+### Debug Configuration
+
+```bash
+# Validate config with full output
+dbackup validate -c backup.yml
+
+# Run with debug logging
+RUST_LOG=debug dbackup backup -c backup.yml -n "Test Backup"
+
+# Check config file exists and is readable
+cat backup.yml | head -20
+```
+
+### Monitor Execution
+
+```bash
+# Watch backup directory for new files
+watch -n 1 'ls -lh /var/backups/postgresql/ | tail -5'
+
+# Check system resources during backup
+watch -n 1 'top -b -n 1 | head -15'
+
+# Stream logs in real-time
+tail -f /var/log/dbackup.log
+```
+
+---
+
+<Callout title="Tip" type="info">
+Use `dbackup <COMMAND> --help` for quick reference on any command.
+</Callout>

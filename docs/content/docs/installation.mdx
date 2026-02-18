@@ -1,0 +1,152 @@
+---
+title: Installation
+description: Install DBackup on your system
+---
+
+# Installation Guide
+
+Choose the installation method that works best for your setup.
+
+## from Source (Recommended)
+
+### Prerequisites
+- Rust 1.70 or higher
+- Git
+- Standard build tools (gcc, make)
+
+### Installation Steps
+
+1. **Clone the repository:**
+   ```bash
+   git clone <repository-url>
+   cd db-backup-tools
+   ```
+
+2. **Build the project:**
+   ```bash
+   cargo build --release
+   ```
+
+3. **Verify the build:**
+   ```bash
+   ./target/release/dbackup --version
+   ```
+
+4. **Optionally install globally:**
+   ```bash
+   cargo install --path .
+   # Now you can run 'dbackup' from anywhere
+   ```
+
+### Build Time
+- First build: 2-5 minutes (depending on your system)
+- Subsequent builds: 10-30 seconds (incremental)
+
+## Using Cargo Install
+
+If you already have Rust installed, the quickest way:
+
+```bash
+cargo install --git <repository-url>
+dbackup --version
+```
+
+## Database Client Tools Required
+
+<Callout title="Critical Requirement" type="warning">
+DBackup requires the following database client tools to be installed and accessible in your system PATH:
+
+- **PostgreSQL**: `pg_dump` command
+- **MySQL**: `mysqldump` command
+
+You must install these tools yourself on your system before using DBackup.
+</Callout>
+
+## Docker Installation
+
+If you prefer Docker, here's a minimal Dockerfile:
+
+```dockerfile
+FROM rust:latest
+
+WORKDIR /app
+COPY . .
+
+# Install PostgreSQL client
+RUN apt-get update && apt-get install -y postgresql-client && rm -rf /var/lib/apt/lists/*
+
+# Build DBackup
+RUN cargo build --release
+
+ENTRYPOINT ["/app/target/release/dbackup"]
+```
+
+Build and run:
+```bash
+docker build -t dbackup .
+docker run -v $(pwd)/backup.yml:/etc/dbackup/backup.yml dbackup backup -c /etc/dbackup/backup.yml
+```
+
+## Verifying Installation
+
+After installation, verify everything works:
+
+```bash
+# Check DBackup version
+dbackup --version
+
+# Check PostgreSQL client
+pg_dump --version
+
+# Generate a test configuration
+dbackup generate -o test-backup.yml
+
+# Validate configuration
+dbackup validate -c test-backup.yml
+```
+
+## Uninstalling
+
+### If installed with Cargo
+```bash
+cargo uninstall dbackup
+```
+
+### If installed from source
+```bash
+rm ./target/release/dbackup
+# Or if copied globally
+sudo rm /usr/local/bin/dbackup
+```
+
+## Troubleshooting Installation
+
+### Rust Not Installed
+Visit [rustup.rs](https://rustup.rs/) and follow the installation instructions.
+
+### PostgreSQL Client Not Found
+See the **Installing PostgreSQL Client Tools** section above for your OS.
+
+### Build Fails with OpenSSL Errors
+```bash
+# On macOS
+brew install openssl
+export LDFLAGS="-L/usr/local/opt/openssl/lib"
+export CPPFLAGS="-I/usr/local/opt/openssl/include"
+cargo build --release
+
+# On Linux
+sudo apt-get install libssl-dev pkg-config
+cargo build --release
+```
+
+### Permission Denied After Installation
+```bash
+chmod +x ./target/release/dbackup
+# Or if global
+sudo chmod +x /usr/local/bin/dbackup
+```
+
+<Callout title="Next Step" type="tip">
+Once installed, head to the [Getting Started](/docs/getting-started) guide to create your first backup!
+</Callout>

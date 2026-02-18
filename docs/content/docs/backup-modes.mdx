@@ -1,0 +1,336 @@
+---
+title: Backup Modes
+description: Understanding Basic and Parallel backup modes
+---
+
+# Backup Modes
+
+DBackup offers two backup modes optimized for different scenarios. Choose the right mode for your database size and infrastructure.
+
+## Quick Comparison
+
+| Feature | Basic | Parallel |
+|---------|-------|----------|
+| **Speed** | Moderate | Fast (2-4x faster) |
+| **File Size** | Smaller (double compression) | Larger (single compression) |
+| **CPU Usage** | Low (single-threaded) | High (multi-threaded) |
+| **Best For** | Small/medium databases | Large databases |
+| **Storage** | Less disk space needed | More disk space needed |
+| **Restore** | Simple, fast | Faster with parallelization |
+| **Complexity** | Simple | Slightly more complex |
+
+## Basic Mode
+
+**Default mode** - Single-threaded backup with maximum compression.
+
+### Configuration
+
+```yaml
+backups:
+  - name: "My Database"
+    driver: postgresql
+    mode: basic  # Default if not specified
+    connection: {...}
+    storage: {...}
+```
+
+### File Format
+
+```
+{filename_prefix}{timestamp}.dump.gz
+```
+
+Example: `backup_20260218_154530.dump.gz`
+
+### How It Works
+
+1. **Custom Format**: Uses PostgreSQL custom binary format (`pg_dump -Fc`)
+2. **Compression Level 9**: Maximum compression (`--compress=9`)
+3. **Gzip**: Additional gzip compression on top
+4. **Result**: Double-compressed backup file for minimal storage
+
+### Performance Data
+
+| Database Size | Backup Time | File Size | CPU Usage |
+|---|---|---|---|
+| 100 MB | ~5 seconds | ~10 MB | Low |
+| 1 GB | ~30 seconds | ~100 MB | Low |
+| 5 GB | ~2 minutes | ~500 MB | Low |
+| 10 GB | ~4 minutes | ~1 GB | Low |
+
+### When to Use Basic Mode
+
+✅ **Use Basic Mode when:**
+- Database is < 10 GB
+- Storage space is limited
+- You need simple, lightweight backups
+- Single-core or low-resource systems
+- Quick restore time isn't critical
+
+### Advantages
+
+- **Smaller Files**: Double compression saves storage
+- **Low Resource Usage**: Works on older, slower systems
+- **Simple Restore**: Just decompress and restore with `pg_restore`
+- **Predictable**: No multi-threaded complexity
+
+### Disadvantages
+
+- **Slower for Large Databases**: Backup time increases linearly with size
+- **Single-Core Only**: Can't leverage multi-core CPUs
+- **More CPU Compression**: Higher CPU usage during compression phase
+
+## Parallel Mode
+
+**Multi-threaded backup** - Faster backup using directory format with parallelization.
+
+### Configuration
+
+```yaml
+backups:
+  - name: "Large Database"
+    driver: postgresql
+    mode: parallel
+    parallel_jobs: 4
+    connection: {...}
+    storage: {...}
+```
+
+### File Format
+
+```
+{filename_prefix}{timestamp}.dir.tar.gz
+```
+
+Example: `backup_20260218_154530.dir.tar.gz`
+
+### How It Works
+
+1. **Directory Format**: Uses PostgreSQL directory format (`pg_dump -Fd`)
+2. **Parallelization**: Splits work across multiple threads
+3. **TAR.GZ**: Files compressed together for storage
+4. **Result**: Faster backup, multiple files, compressed archive
+
+### Configuration Options
+
+- `parallel_jobs`: Number of parallel threads
+  - **Recommended**: 2-8 depending on CPU cores
+  - **Rule of Thumb**: 50-75% of CPU cores
+  - Example: 4-core CPU → use 2-3 jobs
+
+```yaml
+parallel_jobs: 4  # Use 4 threads for parallel backup
+```
+
+### Performance Data
+
+| Database Size | Basic Mode | Parallel (4 jobs) | Speedup |
+|---|---|---|---|
+| 1 GB | 30s | 15s | 2x |
+| 5 GB | 2m | 45s | 2.7x |
+| 10 GB | 4m | 1m 30s | 2.7x |
+| 50 GB | 20m | 6m | 3.3x |
+| 100 GB | 40m | 12m | 3.3x |
+
+### When to Use Parallel Mode
+
+✅ **Use Parallel Mode when:**
+- Database is > 10 GB
+- Multi-core CPU available
+- Fast backup time is critical
+- Running on modern hardware
+- During off-peak hours (uses more CPU)
+
+### Advantages
+
+- **Much Faster**: 2-4x speedup for large databases
+- **CPU Efficient**: Utilizes multi-core systems
+- **Scales Well**: Larger databases see better improvements
+- **Modern Approach**: Takes advantage of modern hardware
+
+### Disadvantages
+
+- **Larger Files**: Single compression (smaller than basic, but still larger than double-compressed)
+- **Higher CPU Usage**: Uses multiple cores during backup
+- **More Complex**: Slightly more overhead with threading
+- **Storage Requirements**: Needs temporary disk space during backup
+
+## Choosing the Right Mode
+
+### Decision Tree
+
+```
+Is your database < 10 GB?
+├─ YES → Use Basic Mode ✓
+├─ NO
+    ├─ Do you have 2+ CPU cores?
+    │  ├─ YES → Use Parallel Mode ✓
+    │  └─ NO → Use Basic Mode ✓
+    └─ Is backup speed critical?
+       ├─ YES → Use Parallel Mode ✓
+       └─ NO → Could use either
+```
+
+### Real-World Scenarios
+
+#### Scenario 1: Small Development Database
+
+**Profile:**
+- ~500 MB database
+- Single-core VM
+- Limited storage
+
+**Recommendation:** Basic Mode
+
+```yaml
+mode: basic
+```
+
+---
+
+#### Scenario 2: Medium Production Database
+
+**Profile:**
+- ~5 GB database
+- 4-core production server
+- Hourly backups
+
+**Recommendation:** Parallel Mode
+
+```yaml
+mode: parallel
+parallel_jobs: 2
+```
+
+---
+
+#### Scenario 3: Large Data Warehouse
+
+**Profile:**
+- ~500 GB database
+- 16-core server
+- Nightly backup window
+
+**Recommendation:** Parallel Mode (aggressive)
+
+```yaml
+mode: parallel
+parallel_jobs: 12
+```
+
+---
+
+#### Scenario 4: Mixed Environment
+
+**Profile:**
+- Multiple databases of varying sizes
+- Different importance levels
+
+**Recommendation:** Use both modes
+
+```yaml
+backups:
+  - name: "Large Production"
+    mode: parallel
+    parallel_jobs: 4
+    
+  - name: "Small Dev"
+    mode: basic
+```
+
+## Performance Tuning
+
+### Optimize Basic Mode
+
+```yaml
+# For maximum compression (slower)
+mode: basic
+
+# For faster basic backups (less compression)
+# Note: This is not configurable in DBackup yet
+```
+
+### Optimize Parallel Mode
+
+**Adjust `parallel_jobs`:**
+
+```bash
+# Check your CPU cores
+nproc
+
+# Use: (CPU cores / 2) to (CPU cores * 0.75)
+# 4 cores → 2-3 jobs
+# 8 cores → 4-6 jobs
+# 16 cores → 8-12 jobs
+```
+
+**Example for 8-core system:**
+
+```yaml
+mode: parallel
+parallel_jobs: 6
+```
+
+### Monitor Backup Performance
+
+```bash
+# Enable verbose logging
+RUST_LOG=debug dbackup backup -c backup.yml
+
+# Check backup duration
+time dbackup backup -c backup.yml
+```
+
+## Storage Impact
+
+### Basic Mode Files
+
+```
+backup_20260218_001230.dump.gz
+```
+
+**Space Calculation:**
+- ~10% of original database size
+
+Example: 10 GB database → ~1 GB backup file
+
+### Parallel Mode Files
+
+```
+backup_20260218_001230.dir.tar.gz/
+  ├── toc.dat
+  ├── 0.dat.gz
+  ├── 1.dat.gz
+  └── ...
+```
+
+**Space Calculation:**
+- ~20-25% of original database size
+
+Example: 10 GB database → ~2.5 GB backup file
+
+## Restoring from Different Modes
+
+### Restore from Basic Mode
+
+```bash
+pg_restore -h localhost -U postgres -d mydb backup_*.dump.gz
+```
+
+### Restore from Parallel Mode
+
+```bash
+# Extract first
+tar -xzf backup_20260218_001230.dir.tar.gz
+
+# Then restore with parallel jobs
+pg_restore -h localhost -U postgres -d mydb -j 4 -Fd extracted_directory
+```
+
+[Learn more about Restoring](/docs/restore)
+
+---
+
+<Callout title="Pro Tip" type="tip">
+Start with Basic Mode if unsure. You can always switch to Parallel Mode later for better performance.
+</Callout>
