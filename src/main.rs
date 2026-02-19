@@ -1,5 +1,6 @@
 mod config;
 mod postgres;
+mod mysql;
 mod scheduler;
 mod updater;
 mod storage;
@@ -9,6 +10,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use config::Config;
 use postgres::PostgresBackup;
+use mysql::MysqlBackup;
 use scheduler::BackupScheduler;
 use updater::check_and_show_update;
 use std::path::PathBuf;
@@ -235,13 +237,34 @@ async fn run_backup(config_path: PathBuf, backup_name: Option<String>) -> Result
     info!("Running {} backup(s)", backups_to_run.len());
 
     for backup_config in backups_to_run {
-        match backup_config.driver.as_str() {
+        match backup_config.driver.to_lowercase().as_str() {
             "postgresql" => {
                 // Resolve storage configuration
                 let storage_config = config.get_storage_for_backup(&backup_config)
                     .context(format!("Failed to resolve storage for backup '{}'", backup_config.name))?;
 
                 let backup = PostgresBackup::new(backup_config.clone(), storage_config);
+                
+                // Validate connection before attempting backup
+                backup.validate_connection()
+                    .context("Connection validation failed")?;
+
+                match backup.execute().await {
+                    Ok(location) => {
+                        info!("✓ Backup '{}' completed: {}", backup_config.name, location);
+                    }
+                    Err(e) => {
+                        error!("✗ Backup '{}' failed: {}", backup_config.name, e);
+                        return Err(e);
+                    }
+                }
+            }
+            "mysql" => {
+                // Resolve storage configuration
+                let storage_config = config.get_storage_for_backup(&backup_config)
+                    .context(format!("Failed to resolve storage for backup '{}'", backup_config.name))?;
+
+                let backup = MysqlBackup::new(backup_config.clone(), storage_config);
                 
                 // Validate connection before attempting backup
                 backup.validate_connection()
@@ -278,7 +301,7 @@ async fn validate_config(config_path: PathBuf) -> Result<()> {
     for backup_config in &config.backups {
         info!("Validating backup: {}", backup_config.name);
 
-        match backup_config.driver.as_str() {
+        match backup_config.driver.to_lowercase().as_str() {
             "postgresql" => {
                 // Resolve storage configuration
                 let storage_config = config.get_storage_for_backup(backup_config)
@@ -309,6 +332,37 @@ async fn validate_config(config_path: PathBuf) -> Result<()> {
                 backup.validate_connection()
                     .context(format!("Database validation failed for backup '{}'", backup_config.name))?;
                 info!("  ✓ PostgreSQL connection validated");
+            }
+            "mysql" => {
+                // Resolve storage configuration
+                let storage_config = config.get_storage_for_backup(backup_config)
+                    .context(format!("Failed to resolve storage for backup '{}'", backup_config.name))?;
+
+                // Validate storage connection
+                info!("  Testing {} storage connection...", storage_config.driver);
+                match storage_config.driver.to_lowercase().as_str() {
+                    "s3" => {
+                        storage::S3Storage::new(&storage_config)
+                            .await
+                            .context(format!("S3 storage validation failed for backup '{}'", backup_config.name))?;
+                        info!("  ✓ S3 storage connection validated");
+                    }
+                    "local" => {
+                        storage::LocalStorage::new(&storage_config)
+                            .context(format!("Local storage validation failed for backup '{}'", backup_config.name))?;
+                        info!("  ✓ Local storage validated");
+                    }
+                    driver => {
+                        error!("Unsupported storage driver: {}", driver);
+                        anyhow::bail!("Unsupported storage driver: {}", driver);
+                    }
+                }
+
+                // Validate database connection
+                let backup = MysqlBackup::new(backup_config.clone(), storage_config);
+                backup.validate_connection()
+                    .context(format!("Database validation failed for backup '{}'", backup_config.name))?;
+                info!("  ✓ MySQL connection validated");
             }
             driver => {
                 error!("Unsupported database driver: {}", driver);
@@ -425,6 +479,38 @@ backups:
       ref: s3_minio
       filename_prefix: dev_
       prefix: dev-backups/
+
+  - name: "Production MySQL - Local"
+    driver: mysql
+    connection:
+      host: db.example.com
+      port: 3306
+      username: backup_user
+      password: your_mysql_password
+      database: production_db
+    mode: parallel
+    parallel_jobs: 4
+    schedule:
+      cron: "0 2 * * *"  # Daily at 2 AM
+    storage:
+      ref: local_backup
+      filename_prefix: mysql_
+
+  - name: "Production MySQL - S3"
+    driver: mysql
+    connection:
+      host: db.example.com
+      port: 3306
+      username: backup_user
+      password: your_mysql_password
+      database: production_db
+    mode: parallel
+    parallel_jobs: 4
+    schedule:
+      cron: "0 4 * * *"  # Daily at 4 AM
+    storage:
+      ref: s3_aws
+      prefix: prod-backups/mysql/
 "#;
 
     std::fs::write(&output_path, sample_config)
