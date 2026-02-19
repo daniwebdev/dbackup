@@ -1,4 +1,3 @@
-```markdown
 # Rust Database Backup Tool
 
 A robust, high-performance database backup utility written in **Rust**, designed for reliability and ease of use through YAML-based configuration.
