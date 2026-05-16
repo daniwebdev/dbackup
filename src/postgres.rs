@@ -1,4 +1,5 @@
 use crate::config::{BackupConfig, StorageConfig};
+use crate::fs_utils::move_file_with_fallback;
 use crate::storage;
 use anyhow::{Context, Result};
 use chrono::Local;
@@ -157,7 +158,7 @@ impl PostgresBackup {
             let final_path = self.storage_config.path.as_ref()
                 .context("Local storage requires 'path' configuration")?
                 .join(&filename);
-            std::fs::rename(&output_path, &final_path)
+            move_file_with_fallback(&output_path, &final_path)
                 .context("Failed to move backup file to final location")?;
             info!("Backup compressed to {}", final_path.display());
             Ok((final_path, filename))
@@ -246,7 +247,7 @@ impl PostgresBackup {
             let final_path = self.storage_config.path.as_ref()
                 .context("Local storage requires 'path' configuration")?
                 .join(&tar_filename);
-            std::fs::rename(&tar_path, &final_path)
+            move_file_with_fallback(&tar_path, &final_path)
                 .context("Failed to move backup file to final location")?;
             info!("Backup compressed to {}", final_path.display());
             Ok((final_path, tar_filename))

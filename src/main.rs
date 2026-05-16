@@ -5,6 +5,7 @@ mod scheduler;
 mod updater;
 mod storage;
 mod retention;
+mod fs_utils;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
