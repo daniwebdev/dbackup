@@ -2,7 +2,7 @@ use anyhow::{Context, Result, anyhow};
 use serde_json::Value;
 use std::fs;
 use std::process::Command;
-use tracing::{info, warn};
+use tracing::debug;
 
 const GITHUB_API_URL: &str = "https://api.github.com/repos/daniwebdev/dbackup/releases/latest";
 
@@ -41,7 +41,7 @@ fn get_target_triple() -> Result<&'static str> {
 }
 
 async fn fetch_latest_release() -> Result<Release> {
-    info!("Checking for latest release from GitHub...");
+    debug!("Checking for latest release from GitHub...");
 
     let client = reqwest::Client::new();
     let response = client
@@ -112,6 +112,23 @@ fn version_compare(current: &str, latest: &str) -> std::cmp::Ordering {
     std::cmp::Ordering::Equal
 }
 
+fn format_bytes(bytes: usize) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    const GB: f64 = MB * 1024.0;
+
+    let b = bytes as f64;
+    if b >= GB {
+        format!("{:.2} GB", b / GB)
+    } else if b >= MB {
+        format!("{:.2} MB", b / MB)
+    } else if b >= KB {
+        format!("{:.2} KB", b / KB)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
 pub async fn check_and_show_update(current_version: &str) -> Result<()> {
     if current_version == "develop" {
         return Ok(()); // Don't check updates for develop builds
@@ -144,8 +161,14 @@ pub async fn check_and_show_update(current_version: &str) -> Result<()> {
 }
 
 pub async fn update_binary(current_version: &str) -> Result<()> {
+    println!("\nDBackup Self-Update");
+    println!("-------------------");
+    println!("Current version: {}", current_version);
+    println!("Step 1/5: Checking latest release...");
+
     let release = fetch_latest_release().await?;
-    info!("Latest release: {}", release.tag_name);
+    println!("Latest release: {}", release.tag_name);
+    debug!("Resolved download URL: {}", release.download_url);
 
     // Check if we're already on the latest version
     match version_compare(current_version, &release.tag_name) {
@@ -158,7 +181,10 @@ pub async fn update_binary(current_version: &str) -> Result<()> {
             return Ok(());
         }
         std::cmp::Ordering::Less => {
-            info!("Newer version available: {} (current: {})", release.tag_name, current_version);
+            println!(
+                "Step 2/5: New version found: {} (current: {})",
+                release.tag_name, current_version
+            );
         }
     }
 
@@ -167,7 +193,7 @@ pub async fn update_binary(current_version: &str) -> Result<()> {
     let extract_dir = temp_dir.join("dbackup-extract");
 
     // Download the release
-    info!("Downloading {} ...", release.download_url);
+    println!("Step 3/5: Downloading package...");
     let client = reqwest::Client::new();
     let response = client
         .get(&release.download_url)
@@ -182,10 +208,10 @@ pub async fn update_binary(current_version: &str) -> Result<()> {
         .context("Failed to read downloaded content")?;
 
     fs::write(&archive_path, &bytes).context("Failed to write archive file")?;
-    info!("Downloaded {} bytes", bytes.len());
+    println!("Downloaded {}", format_bytes(bytes.len()));
 
     // Extract the archive
-    info!("Extracting archive...");
+    println!("Step 4/5: Extracting and preparing binary...");
     fs::create_dir_all(&extract_dir).context("Failed to create extraction directory")?;
 
     let archive_file = fs::File::open(&archive_path).context("Failed to open archive")?;
@@ -208,7 +234,7 @@ pub async fn update_binary(current_version: &str) -> Result<()> {
     let backup_path = current_binary.with_extension("old");
     fs::copy(&current_binary, &backup_path)
         .context("Failed to create backup of current binary")?;
-    info!("Backed up current binary to: {}", backup_path.display());
+    debug!("Backed up current binary to: {}", backup_path.display());
 
     // Make extracted binary executable
     #[cfg(unix)]
@@ -234,38 +260,24 @@ TEMP_EXTRACT="{}"
 # Wait a moment for the process to fully exit
 sleep 1
 
-# Log what we're doing
-echo "[dbackup-update] Attempting binary replacement..."
-
 # First, try to use move (atomic operation)
 if /bin/mv "$NEW_BINARY" "$CURRENT_BINARY" 2>/dev/null; then
-    echo "[dbackup-update] Binary replaced successfully"
+    :
 else
-    # If move fails due to lock, try copy + replace approach
-    echo "[dbackup-update] Move failed, trying copy approach..."
     /bin/cp "$NEW_BINARY" "$CURRENT_BINARY" || {{
-        echo "[dbackup-update] ERROR: Failed to replace binary"
+        echo "dbackup update error: failed to replace binary" >&2
         exit 1
     }}
     /bin/rm -f "$NEW_BINARY" 2>/dev/null || true
-    echo "[dbackup-update] Binary replaced via copy"
 fi
 
 # Ensure executable permission
 /bin/chmod +x "$CURRENT_BINARY"
 
-echo "[dbackup-update] Update completed successfully!"
-echo "[dbackup-update] Current binary: $(file $CURRENT_BINARY)"
-
 # Try to restart systemd service if it exists
 if command -v systemctl &>/dev/null; then
     if systemctl list-unit-files 2>/dev/null | grep -q dbackup.service; then
-        echo "[dbackup-update] Attempting to restart dbackup.service..."
-        if systemctl restart dbackup.service 2>/dev/null; then
-            echo "[dbackup-update] Service restarted successfully"
-        else
-            echo "[dbackup-update] Note: Could not restart service (may require sudo or service not running)"
-        fi
+        systemctl restart dbackup.service 2>/dev/null || true
     fi
 fi
 
@@ -292,8 +304,7 @@ fi
             .context("Failed to set executable permissions on script")?
     }
 
-    info!("✓ Downloaded and prepared binary for {}", release.tag_name);
-    info!("Launching update script to replace binary...");
+    println!("Step 5/5: Applying update in background...");
 
     // Spawn the update script in background
     let _child = Command::new("bash")
@@ -301,15 +312,12 @@ fi
         .spawn()
         .context("Failed to spawn update script")?;
 
-    warn!("Update in progress. This process will exit and the binary will be replaced.");
-    warn!("The update script is running in the background.");
+    println!("\n✓ Update initiated: {}", release.tag_name);
+    println!("- Binary will be replaced after this process exits");
+    println!("- Previous binary backup: {}", backup_path.display());
     if cfg!(unix) {
-        warn!("If 'dbackup' is running as a systemd service, it will be automatically restarted.");
+        println!("- If dbackup.service exists, restart will be attempted");
     }
-
-    println!("\n✓ Update initiated for version {}", release.tag_name);
-    println!("  The binary will be replaced after this process exits.");
-    println!("  Backup of old version saved to: {}", backup_path.display());
 
     Ok(())
 }
